@@ -1,16 +1,28 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState } from "react";
+import { RoleSwitcher, type RoleView } from "@/components/RoleSwitcher";
+import { PatientApp } from "@/components/PatientApp";
+import { StaffApp } from "@/components/StaffApp";
+import { AdminApp } from "@/components/AdminApp";
 
-// IMPORTANT: Fully REPLACE this with your own code
-const PlaceholderIndex = () => {
-  // PLACEHOLDER: Replace this entire return statement with the user's app.
-  // The inline background color is intentionally not part of the design system.
+const Index = () => {
+  const [role, setRole] = useState<RoleView>("patient");
+
   return (
-    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: '#fcfbf8' }}>
-      <img data-lovable-blank-page-placeholder="REMOVE_THIS" src="/placeholder.svg" alt="Your app will live here!" />
+    <div className="min-h-screen bg-background">
+      <RoleSwitcher value={role} onChange={setRole} />
+      <main className="container py-8 md:py-12 animate-fade-in" key={role}>
+        {role === "patient" && <PatientApp />}
+        {role === "staff"   && <StaffApp />}
+        {role === "admin"   && <AdminApp />}
+      </main>
+      <footer className="border-t border-border bg-card/50 mt-16">
+        <div className="container py-6 text-center text-xs text-muted-foreground">
+          SmartServe · Prototype for the Super Health Center of Jones, Isabela ·
+          Structured for Firebase Auth & Firestore integration.
+        </div>
+      </footer>
     </div>
   );
 };
-
-const Index = PlaceholderIndex;
 
 export default Index;
