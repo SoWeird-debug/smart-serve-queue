@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { DiseaseTrendMap } from "@/components/DiseaseTrendMap";
 import {
   appointments, patients, services, diseaseRecords, resources,
   weeklyTrends, monthlyAppointments, serviceDemand, helpers,
@@ -392,15 +393,19 @@ function TrendsPage() {
     acc[r.category] = (acc[r.category] || 0) + r.count; return acc;
   }, {});
   const data = Object.entries(totals).map(([name, value]) => ({ name, value }));
+  const caseTotal = diseaseRecords.reduce((sum, record) => sum + record.count, 0);
+  const affectedAreas = new Set(diseaseRecords.map((record) => `${record.barangay}-${record.municipality}`)).size;
 
   return (
     <>
       <PageHeader title="Disease Trend Monitoring" subtitle="Surveillance data from recent consultations" />
       <div className="grid lg:grid-cols-3 gap-4 mb-4">
-        <KpiCard label="Cases this week"   value={70}  delta={9}  icon={TrendingUp} tone="primary" />
+        <KpiCard label="Cases this week"   value={caseTotal}  delta={9}  icon={TrendingUp} tone="primary" />
         <KpiCard label="Top category"      value="Resp." delta={14} icon={AlertTriangle} tone="warning" />
-        <KpiCard label="Affected barangays"value={7}   delta={2}  icon={Users}     tone="accent" />
+        <KpiCard label="Affected locations"value={affectedAreas}   delta={2}  icon={Users}     tone="accent" />
       </div>
+
+      <DiseaseTrendMap records={diseaseRecords} />
 
       <div className="grid lg:grid-cols-2 gap-4 mb-4">
         <div className="bg-card border border-border rounded-2xl p-5 shadow-soft">
@@ -443,7 +448,7 @@ function TrendsPage() {
             <div key={r.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-muted/30 text-sm">
               <Badge className="bg-primary-soft text-primary border-0">{r.category}</Badge>
               <span className="font-medium flex-1">{r.diagnosis}</span>
-              <span className="text-xs text-muted-foreground">Brgy. {r.barangay}</span>
+              <span className="text-xs text-muted-foreground">Brgy. {r.barangay}, {r.municipality}</span>
               <span className="font-display font-bold text-primary">{r.count}</span>
             </div>
           ))}

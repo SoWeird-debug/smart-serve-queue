@@ -25,6 +25,9 @@ export interface Patient {
   contact: string;
   address: string;
   barangay: string;
+  municipality: string;
+  latitude: number;
+  longitude: number;
 }
 
 export interface Appointment {
@@ -47,6 +50,9 @@ export interface DiseaseRecord {
   date: string;
   count: number;
   barangay: string;
+  municipality: string;
+  latitude: number;
+  longitude: number;
 }
 
 export interface ResourceItem {
@@ -79,14 +85,14 @@ export const services: Service[] = [
 ];
 
 export const patients: Patient[] = [
-  { id: "p1", fullName: "Maria Santos Cruz",        maskedName: "M. Cruz",      dob: "1992-04-12", gender: "Female", contact: "+63 917 123 4567", address: "Purok 2", barangay: "Poblacion 1" },
-  { id: "p2", fullName: "Juan Dela Peña",           maskedName: "J. Dela Peña", dob: "1985-11-03", gender: "Male",   contact: "+63 918 234 5678", address: "Sitio Manga", barangay: "Bantug" },
-  { id: "p3", fullName: "Liza Gonzales Aquino",     maskedName: "L. Aquino",    dob: "2018-02-20", gender: "Female", contact: "+63 919 345 6789", address: "Purok 5", barangay: "San Antonio" },
-  { id: "p4", fullName: "Roberto Mariano Castillo", maskedName: "R. Castillo",  dob: "1978-07-09", gender: "Male",   contact: "+63 920 456 7890", address: "Block 3", barangay: "Poblacion 2" },
-  { id: "p5", fullName: "Angelica Reyes Bautista",  maskedName: "A. Bautista",  dob: "1996-09-14", gender: "Female", contact: "+63 921 567 8901", address: "Purok 1", barangay: "Minanga" },
-  { id: "p6", fullName: "Mark Anthony Villanueva",  maskedName: "M. Villanueva",dob: "1989-01-25", gender: "Male",   contact: "+63 922 678 9012", address: "Sitio Mabini", barangay: "Cabaruan" },
-  { id: "p7", fullName: "Carmela Ocampo Lim",       maskedName: "C. Lim",       dob: "2001-06-30", gender: "Female", contact: "+63 923 789 0123", address: "Purok 4", barangay: "Poblacion 1" },
-  { id: "p8", fullName: "Eduardo Pineda Salazar",   maskedName: "E. Salazar",   dob: "1965-03-18", gender: "Male",   contact: "+63 924 890 1234", address: "Block 2", barangay: "Rang-ayan" },
+  { id: "p1", fullName: "Maria Santos Cruz",        maskedName: "M. Cruz",      dob: "1992-04-12", gender: "Female", contact: "+63 917 123 4567", address: "Purok 2", barangay: "Poblacion 1", municipality: "Jones", latitude: 16.5613, longitude: 121.7023 },
+  { id: "p2", fullName: "Juan Dela Peña",           maskedName: "J. Dela Peña", dob: "1985-11-03", gender: "Male",   contact: "+63 918 234 5678", address: "Sitio Manga", barangay: "Bantug", municipality: "Jones", latitude: 16.5734, longitude: 121.6921 },
+  { id: "p3", fullName: "Liza Gonzales Aquino",     maskedName: "L. Aquino",    dob: "2018-02-20", gender: "Female", contact: "+63 919 345 6789", address: "Purok 5", barangay: "San Antonio", municipality: "Jones", latitude: 16.5029, longitude: 121.6857 },
+  { id: "p4", fullName: "Roberto Mariano Castillo", maskedName: "R. Castillo",  dob: "1978-07-09", gender: "Male",   contact: "+63 920 456 7890", address: "Block 3", barangay: "Poblacion 2", municipality: "Jones", latitude: 16.5581, longitude: 121.7062 },
+  { id: "p5", fullName: "Angelica Reyes Bautista",  maskedName: "A. Bautista",  dob: "1996-09-14", gender: "Female", contact: "+63 921 567 8901", address: "Purok 1", barangay: "Minanga", municipality: "Jones", latitude: 16.5425, longitude: 121.7288 },
+  { id: "p6", fullName: "Mark Anthony Villanueva",  maskedName: "M. Villanueva",dob: "1989-01-25", gender: "Male",   contact: "+63 922 678 9012", address: "Sitio Mabini", barangay: "Cabaruan", municipality: "Jones", latitude: 16.5872, longitude: 121.7351 },
+  { id: "p7", fullName: "Carmela Ocampo Lim",       maskedName: "C. Lim",       dob: "2001-06-30", gender: "Female", contact: "+63 923 789 0123", address: "Purok 4", barangay: "Poblacion 1", municipality: "Jones", latitude: 16.5631, longitude: 121.6997 },
+  { id: "p8", fullName: "Eduardo Pineda Salazar",   maskedName: "E. Salazar",   dob: "1965-03-18", gender: "Male",   contact: "+63 924 890 1234", address: "Block 2", barangay: "Rang-ayan", municipality: "Jones", latitude: 16.6105, longitude: 121.6832 },
 ];
 
 export const appointments: Appointment[] = [
@@ -101,13 +107,15 @@ export const appointments: Appointment[] = [
 ];
 
 export const diseaseRecords: DiseaseRecord[] = [
-  { id: "d1", category: "Respiratory",  diagnosis: "Acute URI",     date: today, count: 18, barangay: "Poblacion 1" },
-  { id: "d2", category: "Respiratory",  diagnosis: "Influenza",     date: today, count: 9,  barangay: "Bantug" },
-  { id: "d3", category: "GI",           diagnosis: "Acute Gastro",  date: today, count: 12, barangay: "Minanga" },
-  { id: "d4", category: "Skin",         diagnosis: "Dermatitis",    date: today, count: 6,  barangay: "Cabaruan" },
-  { id: "d5", category: "Hypertension", diagnosis: "Stage 1 HTN",   date: today, count: 14, barangay: "Poblacion 2" },
-  { id: "d6", category: "Diabetes",     diagnosis: "Type 2 DM",     date: today, count: 7,  barangay: "Rang-ayan" },
-  { id: "d7", category: "Communicable", diagnosis: "Suspected TB",  date: today, count: 4,  barangay: "San Antonio" },
+  { id: "d1", category: "Respiratory",  diagnosis: "Acute URI",     date: today, count: 18, barangay: "Poblacion 1", municipality: "Jones", latitude: 16.5613, longitude: 121.7023 },
+  { id: "d2", category: "Respiratory",  diagnosis: "Influenza",     date: today, count: 9,  barangay: "Bantug", municipality: "Jones", latitude: 16.5734, longitude: 121.6921 },
+  { id: "d3", category: "GI",           diagnosis: "Acute Gastro",  date: today, count: 12, barangay: "Minanga", municipality: "Jones", latitude: 16.5425, longitude: 121.7288 },
+  { id: "d4", category: "Skin",         diagnosis: "Dermatitis",    date: today, count: 6,  barangay: "Cabaruan", municipality: "Jones", latitude: 16.5872, longitude: 121.7351 },
+  { id: "d5", category: "Hypertension", diagnosis: "Stage 1 HTN",   date: today, count: 14, barangay: "Poblacion 2", municipality: "Jones", latitude: 16.5581, longitude: 121.7062 },
+  { id: "d6", category: "Diabetes",     diagnosis: "Type 2 DM",     date: today, count: 7,  barangay: "Rang-ayan", municipality: "Jones", latitude: 16.6105, longitude: 121.6832 },
+  { id: "d7", category: "Communicable", diagnosis: "Suspected TB",  date: today, count: 4,  barangay: "San Antonio", municipality: "Jones", latitude: 16.5029, longitude: 121.6857 },
+  { id: "d8", category: "Respiratory",  diagnosis: "Influenza",     date: today, count: 8,  barangay: "Masaya Sur", municipality: "San Agustin", latitude: 16.4925, longitude: 121.7460 },
+  { id: "d9", category: "GI",           diagnosis: "Acute Gastro",  date: today, count: 5,  barangay: "Ipil", municipality: "Echague", latitude: 16.6900, longitude: 121.6805 },
 ];
 
 export const resources: ResourceItem[] = [

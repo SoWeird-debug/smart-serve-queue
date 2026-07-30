@@ -8,6 +8,8 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    // Required when the dev server is accessed through an ngrok HTTPS tunnel.
+    allowedHosts: [".ngrok-free.app"],
     hmr: {
       overlay: false,
     },

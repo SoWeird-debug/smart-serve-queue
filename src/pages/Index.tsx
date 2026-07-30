@@ -17,8 +17,7 @@ const Index = () => {
       </main>
       <footer className="border-t border-border bg-card/50 mt-16">
         <div className="container py-6 text-center text-xs text-muted-foreground">
-          SmartServe · Prototype for the Super Health Center of Jones, Isabela ·
-          Structured for Firebase Auth & Firestore integration.
+          SmartServe · Prototype for the Super Health Center of Jones, Isabela
         </div>
       </footer>
     </div>

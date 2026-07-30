@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import {
   services, appointments, patients, notifications, helpers,
 } from "@/data/mockData";
+import { LocationPickerMap, type PinnedLocation } from "@/components/LocationPickerMap";
 
 const iconMap = { Stethoscope, Baby, Syringe, Smile, TestTube, ShieldPlus };
 
@@ -22,6 +23,7 @@ export function PatientApp() {
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<number>(new Date().getDate() + 1);
   const [selectedTime, setSelectedTime] = useState<string>("09:30 AM");
+  const [selectedLocation, setSelectedLocation] = useState<PinnedLocation | null>(null);
   const me = patients[0];
 
   return (
@@ -38,9 +40,9 @@ export function PatientApp() {
         <div className="h-full overflow-y-auto pb-24 bg-background">
           {screen === "login"   && <LoginScreen   onLogin={() => setScreen("home")} />}
           {screen === "home"    && <HomeScreen    me={me} onBook={() => setScreen("services")} onView={() => setScreen("myAppts")} onNotif={() => setScreen("notif")} />}
-          {screen === "services"&& <ServicesScreen onBack={() => setScreen("home")} onPick={(id) => { setSelectedService(id); setScreen("schedule"); }} />}
-          {screen === "schedule"&& <ScheduleScreen serviceId={selectedService!} date={selectedDate} time={selectedTime} onDate={setSelectedDate} onTime={setSelectedTime} onBack={() => setScreen("services")} onConfirm={() => setScreen("confirm")} />}
-          {screen === "confirm" && <ConfirmScreen serviceId={selectedService!} date={selectedDate} time={selectedTime} onDone={() => setScreen("myAppts")} />}
+          {screen === "services"&& <ServicesScreen onBack={() => setScreen("home")} onPick={(id) => { setSelectedService(id); setSelectedLocation(null); setScreen("schedule"); }} />}
+          {screen === "schedule"&& <ScheduleScreen serviceId={selectedService!} date={selectedDate} time={selectedTime} location={selectedLocation} onDate={setSelectedDate} onTime={setSelectedTime} onLocation={setSelectedLocation} onBack={() => setScreen("services")} onConfirm={() => setScreen("confirm")} />}
+          {screen === "confirm" && <ConfirmScreen serviceId={selectedService!} date={selectedDate} time={selectedTime} location={selectedLocation!} onDone={() => setScreen("myAppts")} />}
           {screen === "myAppts" && <MyAppointmentsScreen onBack={() => setScreen("home")} />}
           {screen === "notif"   && <NotifScreen onBack={() => setScreen("home")} />}
         </div>
@@ -234,7 +236,7 @@ function ServicesScreen({ onBack, onPick }: { onBack: () => void; onPick: (id: s
   );
 }
 
-function ScheduleScreen({ serviceId, date, time, onDate, onTime, onBack, onConfirm }: any) {
+function ScheduleScreen({ serviceId, date, time, location, onDate, onTime, onLocation, onBack, onConfirm }: any) {
   const svc = helpers.getService(serviceId);
   const today = new Date();
   const days = Array.from({ length: 14 }, (_, i) => {
@@ -287,15 +289,32 @@ function ScheduleScreen({ serviceId, date, time, onDate, onTime, onBack, onConfi
           </div>
         </div>
 
-        <Button onClick={onConfirm} className="w-full h-12 rounded-2xl bg-gradient-primary border-0 shadow-glow">
+        <div>
+          <div className="mb-2 flex items-end justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase text-muted-foreground">Patient location</p>
+              <p className="text-[10px] text-muted-foreground">Required for local disease monitoring</p>
+            </div>
+            {location && <Badge className="border-0 bg-secondary-soft text-secondary">Pinned</Badge>}
+          </div>
+          <LocationPickerMap value={location} onChange={onLocation} />
+          {location && (
+            <p className="mt-2 text-[10px] text-muted-foreground">
+              Saved pin: {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
+            </p>
+          )}
+        </div>
+
+        <Button disabled={!location} onClick={onConfirm} className="w-full h-12 rounded-2xl bg-gradient-primary border-0 shadow-glow">
           Confirm booking <ArrowRight className="w-4 h-4 ml-2" />
         </Button>
+        {!location && <p className="-mt-3 text-center text-[10px] text-warning">Pin the patient location before confirming.</p>}
       </div>
     </div>
   );
 }
 
-function ConfirmScreen({ serviceId, time, onDone }: any) {
+function ConfirmScreen({ serviceId, time, location, onDone }: any) {
   const svc = helpers.getService(serviceId);
   const queue = "A-009";
   return (
@@ -332,6 +351,7 @@ function ConfirmScreen({ serviceId, time, onDone }: any) {
 
       <div className="w-full mt-5 bg-card border border-border rounded-2xl p-4 text-left text-xs space-y-2">
         <div className="flex gap-2"><MapPin className="w-4 h-4 text-primary shrink-0" /><span>Super Health Center, Jones, Isabela</span></div>
+        <div className="flex gap-2"><MapPin className="w-4 h-4 text-secondary shrink-0" /><span>Patient location saved ({location.latitude.toFixed(4)}, {location.longitude.toFixed(4)})</span></div>
         <div className="flex gap-2"><Phone className="w-4 h-4 text-primary shrink-0" /><span>(078) 000-0000</span></div>
         <div className="flex gap-2"><Clock className="w-4 h-4 text-primary shrink-0" /><span>Please arrive 15 minutes before your slot.</span></div>
       </div>
