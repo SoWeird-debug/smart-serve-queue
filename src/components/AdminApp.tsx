@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { DiseaseTrendMap } from "@/components/DiseaseTrendMap";
 import {
-  appointments, patients, services, diseaseRecords, resources,
+  appointments, patients, services, diseaseRecords, resources, medicines, medicalRecords,
   weeklyTrends, monthlyAppointments, serviceDemand, helpers,
 } from "@/data/mockData";
 import {
@@ -20,7 +20,7 @@ import {
 
 type Page =
   | "overview" | "appointments" | "patients" | "services"
-  | "trends"   | "forecast"    | "reports"  | "users";
+  | "trends"   | "forecast"    | "inventory" | "reports"  | "users";
 
 const nav: { id: Page; label: string; icon: any }[] = [
   { id: "overview",     label: "Overview",        icon: LayoutDashboard },
@@ -29,6 +29,7 @@ const nav: { id: Page; label: string; icon: any }[] = [
   { id: "services",     label: "Services",        icon: Stethoscope    },
   { id: "trends",       label: "Disease Trends",  icon: TrendingUp     },
   { id: "forecast",     label: "Forecasting",     icon: Boxes          },
+  { id: "inventory",    label: "Inventory & Audit",icon: Boxes          },
   { id: "reports",      label: "Reports",         icon: FileBarChart   },
   { id: "users",        label: "Staff & Users",   icon: UserCog        },
 ];
@@ -78,12 +79,20 @@ export function AdminApp() {
           {page === "services"     && <ServicesPage />}
           {page === "trends"       && <TrendsPage />}
           {page === "forecast"     && <ForecastPage />}
+          {page === "inventory"    && <InventoryAuditPage />}
           {page === "reports"      && <ReportsPage />}
           {page === "users"        && <UsersPage />}
         </main>
       </div>
     </div>
   );
+}
+
+function InventoryAuditPage() {
+  return <><PageHeader title="Inventory & audit trail" subtitle="Oversight of clinic medicines, dispensing, and digital records" />
+    <div className="grid md:grid-cols-3 gap-4 mb-5"><KpiCard label="Medicine items" value={medicines.length} delta={0} icon={Boxes} tone="primary" /><KpiCard label="Low-stock items" value={medicines.filter((m) => m.stock <= m.reorderLevel).length} delta={-2} icon={AlertTriangle} tone="warning" /><KpiCard label="Digital records" value={medicalRecords.length} delta={12} icon={Users} tone="secondary" /></div>
+    <div className="grid lg:grid-cols-2 gap-4"><section className="bg-card border border-border rounded-2xl shadow-soft overflow-hidden"><div className="p-4 border-b border-border"><h3 className="font-display font-bold">Medicine oversight</h3><p className="text-xs text-muted-foreground">View stock levels; pharmacy staff perform dispensing and adjustments.</p></div>{medicines.map((medicine) => <div key={medicine.id} className="p-4 border-b border-border last:border-0 flex justify-between gap-3"><div><p className="font-semibold text-sm">{medicine.name} {medicine.strength}</p><p className="text-xs text-muted-foreground">Batch {medicine.batch} · Expires {medicine.expiry}</p></div><Badge className={medicine.stock <= medicine.reorderLevel ? "bg-warning/15 text-warning border-0" : "bg-secondary-soft text-secondary border-0"}>{medicine.stock} in stock</Badge></div>)}</section>
+    <section className="bg-card border border-border rounded-2xl shadow-soft overflow-hidden"><div className="p-4 border-b border-border"><h3 className="font-display font-bold">Record audit trail</h3><p className="text-xs text-muted-foreground">Every live-system event must include user, timestamp, action, and patient-record reference.</p></div>{medicalRecords.map((record) => <div key={record.id} className="p-4 border-b border-border last:border-0"><p className="font-semibold text-sm">{helpers.getPatient(record.patientId).fullName} — {record.diagnosis}</p><p className="text-xs text-muted-foreground mt-1">Recorded by {record.clinician} · {record.date} · Prescription status: {record.status}</p></div>)}<div className="p-4 bg-muted/30 text-xs text-muted-foreground">Paper records must be scanned or encoded with the source document, encoder, and verification status.</div></section></div></>;
 }
 
 /* ---------- shared ---------- */
@@ -282,7 +291,7 @@ function Appointments() {
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
             <tr>
-              {["Queue","Patient","Service","Time","Room","Attendance","Status"].map(h => <th key={h} className="text-left p-4 font-semibold">{h}</th>)}
+              {["Booking","Patient","Service","Date","Attendance","Queue","Status"].map(h => <th key={h} className="text-left p-4 font-semibold">{h}</th>)}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -291,19 +300,19 @@ function Appointments() {
               const s = helpers.getService(a.serviceId);
               return (
                 <tr key={a.id} className="hover:bg-muted/20">
-                  <td className="p-4 font-display font-bold text-primary">{a.queueNumber}</td>
+                  <td className="p-4 font-display font-bold text-primary">APT-2026-00{a.id.slice(1)}</td>
                   <td className="p-4">
                     <p className="font-medium">{p.fullName}</p>
                     <p className="text-xs text-muted-foreground">{p.barangay}</p>
                   </td>
                   <td className="p-4 text-muted-foreground">{s.name}</td>
-                  <td className="p-4">{a.timeSlot}</td>
-                  <td className="p-4 text-muted-foreground">{a.room}</td>
+                  <td className="p-4">{helpers.formatDate(a.date)}</td>
                   <td className="p-4"><Badge className={cn("border-0",
                     a.attendanceStatus === "Present" && "bg-secondary-soft text-secondary",
                     a.attendanceStatus === "Pending" && "bg-warning/15 text-warning",
                     a.attendanceStatus === "Absent"  && "bg-destructive/15 text-destructive",
                   )}>{a.attendanceStatus}</Badge></td>
+                  <td className="p-4 text-muted-foreground">{a.attendanceStatus === "Present" ? a.queueNumber : "—"}</td>
                   <td className="p-4"><Badge className={cn("border-0",
                     a.queueStatus === "Now Serving" && "bg-secondary text-secondary-foreground",
                     a.queueStatus === "Waiting"     && "bg-warning/20 text-warning",
@@ -352,8 +361,9 @@ function PatientsPage() {
 function ServicesPage() {
   return (
     <>
-      <PageHeader title="Services & Schedules" subtitle="Manage available services and daily capacity"
+      <PageHeader title="Services, Clinic Schedule & Appointment Capacity" subtitle="Manage date-based online booking; patients do not choose an exact consultation time"
         action={<Button className="rounded-xl bg-gradient-primary border-0"><Plus className="w-4 h-4 mr-1" /> New service</Button>} />
+      <div className="grid md:grid-cols-3 gap-4 mb-4"><div className="bg-card border border-border rounded-2xl p-4 shadow-soft"><p className="text-xs text-muted-foreground uppercase">Clinic status</p><p className="font-display font-bold text-xl text-secondary mt-1">Open</p><p className="text-xs text-muted-foreground">Consultation hours: 8:00 AM – 5:00 PM</p></div><div className="bg-card border border-border rounded-2xl p-4 shadow-soft"><p className="text-xs text-muted-foreground uppercase">Operating days</p><p className="font-semibold mt-1">Monday – Friday</p><p className="text-xs text-muted-foreground">Saturday & Sunday closed</p></div><div className="bg-card border border-border rounded-2xl p-4 shadow-soft"><p className="text-xs text-muted-foreground uppercase">Calendar status</p><p className="font-semibold mt-1">Aug 21: Holiday closure</p><p className="text-xs text-muted-foreground">Online booking disabled</p></div></div>
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
         {services.map(s => {
           const used = appointments.filter(a => a.serviceId === s.id).length;
@@ -365,11 +375,11 @@ function ServicesPage() {
                   <h4 className="font-display font-bold">{s.name}</h4>
                   <p className="text-xs text-muted-foreground">{s.description}</p>
                 </div>
-                <Badge className="bg-primary-soft text-primary border-0">{s.duration}m</Badge>
+                <Badge className="bg-primary-soft text-primary border-0">Online enabled</Badge>
               </div>
               <div className="flex items-end justify-between text-xs mb-1">
-                <span className="text-muted-foreground">Capacity used</span>
-                <span className="font-semibold">{used}/{s.capacity}</span>
+                <span className="text-muted-foreground">Booked / daily capacity</span>
+                <span className="font-semibold">{used}/{s.capacity} · {s.capacity - used} available</span>
               </div>
               <div className="h-2 bg-muted rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-primary rounded-full" style={{ width: `${pct}%` }} />
@@ -382,6 +392,7 @@ function ServicesPage() {
           );
         })}
       </div>
+      <div className="mt-4 bg-card border border-border rounded-2xl p-5 shadow-soft"><h3 className="font-display font-bold">Selected date: August 18, 2026</h3><p className="text-sm text-muted-foreground mt-1">Open · Clinic hours 8:00 AM – 5:00 PM · edit hours, capacity, closure, service availability, or holiday override here.</p><div className="grid sm:grid-cols-3 gap-3 mt-4">{["Open · 19 slots available", "Full · online booking closed", "Holiday · clinic closed"].map((item) => <div key={item} className="rounded-xl bg-muted/50 p-3 text-sm">{item}</div>)}</div></div>
     </>
   );
 }
@@ -582,15 +593,17 @@ function ReportsPage() {
 function UsersPage() {
   const staff = [
     { name: "Dr. Carmela Reyes",    role: "Admin",          dept: "Administration",     status: "Active" },
-    { name: "Dr. Joseph Mariano",   role: "Physician",      dept: "General Consult.",   status: "Active" },
+    { name: "Dr. Joseph Mariano",   role: "Doctor",         dept: "General Consult.",   status: "Active" },
     { name: "Nurse Liza Andrada",   role: "Staff",          dept: "Triage / Queue",     status: "Active" },
     { name: "Midwife Anna Soriano", role: "Staff",          dept: "Maternal Health",    status: "Active" },
     { name: "Mr. Renato Pascual",   role: "Queue Monitor",  dept: "Frontdesk",          status: "Active" },
     { name: "Ms. Karen Bituin",     role: "Staff",          dept: "Laboratory",         status: "On leave" },
+    { name: "Ms. Alma Garcia",      role: "Pharmacy Staff", dept: "Clinic Pharmacy",    status: "Active" },
+    { name: "Mr. Joel Mendoza",     role: "Inventory Staff",dept: "Clinic Pharmacy",    status: "Active" },
   ];
   return (
     <>
-      <PageHeader title="Staff & User Management" subtitle="Roles: Patient · Staff · Admin"
+      <PageHeader title="Staff & User Management" subtitle="Roles: Patient · Front Desk · Nurse · Doctor · Pharmacy · Inventory · Admin"
         action={<Button className="rounded-xl bg-gradient-primary border-0"><Plus className="w-4 h-4 mr-1" /> Invite user</Button>} />
       <div className="bg-card border border-border rounded-2xl shadow-soft overflow-hidden">
         <table className="w-full text-sm">
@@ -608,8 +621,9 @@ function UsersPage() {
                 </td>
                 <td className="p-4"><Badge className={cn("border-0",
                   s.role === "Admin"     && "bg-accent-soft text-accent",
-                  s.role === "Physician" && "bg-primary-soft text-primary",
+                  s.role === "Doctor"    && "bg-primary-soft text-primary",
                   s.role === "Staff"     && "bg-secondary-soft text-secondary",
+                  (s.role === "Pharmacy Staff" || s.role === "Inventory Staff") && "bg-secondary-soft text-secondary",
                   s.role === "Queue Monitor" && "bg-warning/15 text-warning",
                 )}>{s.role}</Badge></td>
                 <td className="p-4 text-muted-foreground">{s.dept}</td>

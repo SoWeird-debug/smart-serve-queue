@@ -3,6 +3,8 @@ import { RoleSwitcher, type RoleView } from "@/components/RoleSwitcher";
 import { PatientApp } from "@/components/PatientApp";
 import { StaffApp } from "@/components/StaffApp";
 import { AdminApp } from "@/components/AdminApp";
+import { DoctorApp } from "@/components/DoctorApp";
+import { PharmacyApp } from "@/components/PharmacyApp";
 
 const Index = () => {
   const [role, setRole] = useState<RoleView>("patient");
@@ -13,6 +15,8 @@ const Index = () => {
       <main className="container py-8 md:py-12 animate-fade-in" key={role}>
         {role === "patient" && <PatientApp />}
         {role === "staff"   && <StaffApp />}
+        {role === "doctor"  && <DoctorApp />}
+        {role === "pharmacy" && <PharmacyApp />}
         {role === "admin"   && <AdminApp />}
       </main>
       <footer className="border-t border-border bg-card/50 mt-16">

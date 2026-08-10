@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
 import {
   Activity, CheckCircle2, Clock, MonitorPlay, RefreshCw, Users,
-  UserCheck, SkipForward, Phone, ChevronRight, DoorOpen,
+  UserCheck, SkipForward, Phone, ChevronRight, DoorOpen, ClipboardPlus, UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { appointments as initial, helpers } from "@/data/mockData";
 import type { Appointment } from "@/data/mockData";
 
-type Tab = "tv" | "attendance" | "control";
+type Tab = "tv" | "attendance" | "triage" | "control";
 
 export function StaffApp() {
   const [tab, setTab] = useState<Tab>("tv");
@@ -37,6 +40,7 @@ export function StaffApp() {
           {[
             { id: "tv" as Tab,         label: "TV Queue Board", icon: MonitorPlay },
             { id: "attendance" as Tab, label: "Check-in",       icon: UserCheck   },
+            { id: "triage" as Tab,     label: "Triage",         icon: ClipboardPlus },
             { id: "control" as Tab,    label: "Queue Control",  icon: Activity    },
           ].map((t) => {
             const Icon = t.icon;
@@ -54,17 +58,23 @@ export function StaffApp() {
 
       {tab === "tv" && <TVBoard appts={appts} now={now} />}
       {tab === "attendance" && <AttendanceScreen appts={appts} update={update} />}
+      {tab === "triage" && <TriageScreen />}
       {tab === "control" && <QueueControl appts={appts} update={update} />}
     </div>
   );
 }
 
+function TriageScreen() {
+  const [saved, setSaved] = useState(false);
+  return <div className="max-w-3xl mx-auto bg-card border border-border rounded-2xl p-5 shadow-soft"><div className="flex items-center gap-2 mb-5"><ClipboardPlus className="w-5 h-5 text-primary" /><div><h3 className="font-display font-bold text-lg">Triage & vital signs</h3><p className="text-sm text-muted-foreground">Complete this before the patient is sent to the doctor.</p></div></div><div className="grid md:grid-cols-2 gap-4"><div><Label>Patient</Label><select className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm">{initial.slice(0, 5).map((a) => <option key={a.id}>{helpers.getPatient(a.patientId).fullName} · {a.queueNumber}</option>)}</select></div><div><Label>Triage priority</Label><select className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>Normal</option><option>Priority</option><option>Urgent</option><option>Emergency</option></select></div><div><Label>Blood pressure</Label><Input className="mt-1" placeholder="120 / 80 mmHg" /></div><div><Label>Temperature</Label><Input className="mt-1" placeholder="36.8 °C" /></div><div><Label>Pulse / respiratory rate</Label><Input className="mt-1" placeholder="72 bpm / 16 rpm" /></div><div><Label>Known allergies</Label><Input className="mt-1" placeholder="None known" /></div></div><div className="mt-4"><Label>Chief complaint / initial assessment</Label><Textarea className="mt-1" placeholder="Patient's reason for visit and observations" /></div><div className="flex flex-wrap gap-3 mt-5"><Button onClick={() => setSaved(true)}><ClipboardPlus className="w-4 h-4 mr-2" />Complete triage</Button><Button variant="outline"><UserPlus className="w-4 h-4 mr-2" />Register walk-in</Button></div>{saved && <p className="text-sm text-secondary mt-3">Triage recorded in this prototype. Patient status is ready for the doctor queue; emergencies require immediate care or referral.</p>}</div>;
+}
+
 /* ---------------- TV BOARD ---------------- */
 
 function TVBoard({ appts, now }: { appts: Appointment[]; now: Date }) {
-  const nowServing = appts.filter((a) => a.queueStatus === "Now Serving");
-  const waiting    = appts.filter((a) => a.queueStatus === "Waiting");
-  const completed  = appts.filter((a) => a.queueStatus === "Completed").length;
+  const nowServing = appts.filter((a) => a.queueStatus === "Now Serving" || a.queueStatus === "Called");
+  const waiting    = appts.filter((a) => a.queueStatus === "Waiting" || a.queueStatus === "Waiting for Triage" || a.queueStatus === "Waiting for Doctor");
+  const completed  = appts.filter((a) => a.queueStatus === "Completed" || a.queueStatus === "Consultation Completed").length;
   const noShow     = appts.filter((a) => a.queueStatus === "No Show").length;
 
   return (
@@ -193,8 +203,8 @@ function AttendanceScreen({ appts, update }: any) {
               )}>{a.attendanceStatus}</Badge>
               <div className="flex gap-2">
                 <Button size="sm" variant={a.attendanceStatus === "Present" ? "default" : "outline"}
-                  onClick={() => update(a.id, { attendanceStatus: "Present", queueStatus: a.queueStatus === "Scheduled" ? "Waiting" : a.queueStatus })}>
-                  <UserCheck className="w-4 h-4 mr-1" /> Present
+                  onClick={() => update(a.id, { attendanceStatus: "Present", queueStatus: a.queueStatus === "Scheduled" ? "Waiting for Triage" : a.queueStatus })}>
+                  <UserCheck className="w-4 h-4 mr-1" /> Check in
                 </Button>
                 <Button size="sm" variant="outline"
                   onClick={() => update(a.id, { attendanceStatus: "Absent", queueStatus: "No Show" })}>
@@ -212,12 +222,11 @@ function AttendanceScreen({ appts, update }: any) {
 /* ---------------- QUEUE CONTROL ---------------- */
 
 function QueueControl({ appts, update }: any) {
-  const waiting = appts.filter((a: Appointment) => a.queueStatus === "Waiting");
-  const serving = appts.find((a: Appointment) => a.queueStatus === "Now Serving");
+  const waiting = appts.filter((a: Appointment) => a.queueStatus === "Waiting" || a.queueStatus === "Waiting for Triage" || a.queueStatus === "Waiting for Doctor");
+  const serving = appts.find((a: Appointment) => a.queueStatus === "Called" || a.queueStatus === "Now Serving");
 
   const callNext = () => {
-    if (serving) update(serving.id, { queueStatus: "Completed" });
-    if (waiting[0]) update(waiting[0].id, { queueStatus: "Now Serving" });
+    if (waiting[0]) update(waiting[0].id, { queueStatus: "Called" });
   };
 
   return (
@@ -241,8 +250,8 @@ function QueueControl({ appts, update }: any) {
             {serving && (
               <>
                 <Button variant="outline" className="border-primary-foreground/30 text-primary-foreground hover:bg-card/10"
-                  onClick={() => update(serving.id, { queueStatus: "Completed" })}>
-                  <CheckCircle2 className="w-4 h-4 mr-2" /> Mark completed
+                  onClick={() => update(serving.id, { queueStatus: "In Consultation" })}>
+                  <CheckCircle2 className="w-4 h-4 mr-2" /> Send to doctor
                 </Button>
                 <Button variant="outline" className="border-primary-foreground/30 text-primary-foreground hover:bg-card/10"
                   onClick={() => update(serving.id, { queueStatus: "No Show", attendanceStatus: "Absent" })}>
@@ -271,8 +280,7 @@ function QueueControl({ appts, update }: any) {
                     <p className="text-xs text-muted-foreground">{a.timeSlot} · {a.room}</p>
                   </div>
                   <Button size="sm" variant="ghost" onClick={() => {
-                    if (serving) update(serving.id, { queueStatus: "Completed" });
-                    update(a.id, { queueStatus: "Now Serving" });
+                    update(a.id, { queueStatus: "Called" });
                   }}>
                     Call <ChevronRight className="w-4 h-4 ml-1" />
                   </Button>

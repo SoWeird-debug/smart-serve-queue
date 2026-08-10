@@ -1,11 +1,13 @@
-import { Smartphone, Monitor, LayoutDashboard, Heart } from "lucide-react";
+import { Smartphone, Monitor, LayoutDashboard, Heart, Stethoscope, Pill } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type RoleView = "patient" | "staff" | "admin";
+export type RoleView = "patient" | "staff" | "doctor" | "pharmacy" | "admin";
 
 const roles: { id: RoleView; label: string; sub: string; icon: typeof Smartphone }[] = [
   { id: "patient", label: "Patient",         sub: "Mobile App",       icon: Smartphone        },
   { id: "staff",   label: "Staff / Queue",   sub: "Onsite + TV",      icon: Monitor           },
+  { id: "doctor",  label: "Doctor",          sub: "Consultation",     icon: Stethoscope       },
+  { id: "pharmacy",label: "Pharmacy",        sub: "Inventory",        icon: Pill              },
   { id: "admin",   label: "Admin",           sub: "Dashboard",        icon: LayoutDashboard   },
 ];
 

@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   Stethoscope, Baby, Syringe, Smile, TestTube, ShieldPlus,
   Bell, Calendar, Clock, ChevronLeft, ChevronRight, CheckCircle2,
-  Home, User, ListChecks, MapPin, Phone, ArrowRight, Sparkles, LogIn,
+  Home, User, ListChecks, MapPin, Phone, ArrowRight, Sparkles, LogIn, FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,19 +10,18 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
-  services, appointments, patients, notifications, helpers,
+  services, appointments, patients, notifications, helpers, medicalRecords,
 } from "@/data/mockData";
 import { LocationPickerMap, type PinnedLocation } from "@/components/LocationPickerMap";
 
 const iconMap = { Stethoscope, Baby, Syringe, Smile, TestTube, ShieldPlus };
 
-type Screen = "login" | "home" | "services" | "schedule" | "confirm" | "myAppts" | "notif";
+type Screen = "login" | "home" | "services" | "schedule" | "confirm" | "myAppts" | "records" | "notif";
 
 export function PatientApp() {
   const [screen, setScreen] = useState<Screen>("login");
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<number>(new Date().getDate() + 1);
-  const [selectedTime, setSelectedTime] = useState<string>("09:30 AM");
   const [selectedLocation, setSelectedLocation] = useState<PinnedLocation | null>(null);
   const me = patients[0];
 
@@ -41,9 +40,10 @@ export function PatientApp() {
           {screen === "login"   && <LoginScreen   onLogin={() => setScreen("home")} />}
           {screen === "home"    && <HomeScreen    me={me} onBook={() => setScreen("services")} onView={() => setScreen("myAppts")} onNotif={() => setScreen("notif")} />}
           {screen === "services"&& <ServicesScreen onBack={() => setScreen("home")} onPick={(id) => { setSelectedService(id); setSelectedLocation(null); setScreen("schedule"); }} />}
-          {screen === "schedule"&& <ScheduleScreen serviceId={selectedService!} date={selectedDate} time={selectedTime} location={selectedLocation} onDate={setSelectedDate} onTime={setSelectedTime} onLocation={setSelectedLocation} onBack={() => setScreen("services")} onConfirm={() => setScreen("confirm")} />}
-          {screen === "confirm" && <ConfirmScreen serviceId={selectedService!} date={selectedDate} time={selectedTime} location={selectedLocation!} onDone={() => setScreen("myAppts")} />}
+          {screen === "schedule"&& <ScheduleScreen serviceId={selectedService!} date={selectedDate} location={selectedLocation} onDate={setSelectedDate} onLocation={setSelectedLocation} onBack={() => setScreen("services")} onConfirm={() => setScreen("confirm")} />}
+          {screen === "confirm" && <ConfirmScreen serviceId={selectedService!} date={selectedDate} location={selectedLocation!} onDone={() => setScreen("myAppts")} />}
           {screen === "myAppts" && <MyAppointmentsScreen onBack={() => setScreen("home")} />}
+          {screen === "records" && <MedicalRecordsScreen onBack={() => setScreen("home")} />}
           {screen === "notif"   && <NotifScreen onBack={() => setScreen("home")} />}
         </div>
 
@@ -129,7 +129,7 @@ function HomeScreen({ me, onBook, onView, onNotif }: any) {
         <div className="bg-card rounded-2xl shadow-card p-4 border border-border animate-pop-in">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-semibold text-primary uppercase tracking-wide">Next Appointment</span>
-            <Badge className="bg-secondary-soft text-secondary border-0">{next.queueStatus}</Badge>
+            <Badge className="bg-secondary-soft text-secondary border-0">Confirmed</Badge>
           </div>
           <div className="flex items-center gap-3">
             <div className="w-14 h-14 rounded-xl bg-primary-soft text-primary flex items-center justify-center">
@@ -137,11 +137,11 @@ function HomeScreen({ me, onBook, onView, onNotif }: any) {
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-semibold truncate">{svc.name}</p>
-              <p className="text-xs text-muted-foreground">{helpers.formatDate(next.date)} · {next.timeSlot}</p>
+              <p className="text-xs text-muted-foreground">{helpers.formatDate(next.date)} · Clinic hours: 8:00 AM – 5:00 PM</p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] text-muted-foreground">Queue</p>
-              <p className="font-display font-bold text-primary">{next.queueNumber}</p>
+              <p className="text-[10px] text-muted-foreground">Booking</p>
+              <p className="font-display font-bold text-primary">APT-2026-0098</p>
             </div>
           </div>
           <Button onClick={onView} variant="ghost" size="sm" className="w-full mt-3 text-primary">
@@ -236,16 +236,15 @@ function ServicesScreen({ onBack, onPick }: { onBack: () => void; onPick: (id: s
   );
 }
 
-function ScheduleScreen({ serviceId, date, time, location, onDate, onTime, onLocation, onBack, onConfirm }: any) {
+function ScheduleScreen({ serviceId, date, location, onDate, onLocation, onBack, onConfirm }: any) {
   const svc = helpers.getService(serviceId);
   const today = new Date();
   const days = Array.from({ length: 14 }, (_, i) => {
     const d = new Date(today); d.setDate(today.getDate() + i); return d;
   });
-  const slots = ["08:00 AM","08:30 AM","09:00 AM","09:30 AM","10:00 AM","10:30 AM","11:00 AM","01:00 PM","01:30 PM","02:00 PM"];
   return (
     <div>
-      <ScreenHeader title="Pick date & time" onBack={onBack} />
+      <ScreenHeader title="Select appointment date" onBack={onBack} />
       <div className="p-5 space-y-5">
         <div className="bg-primary-soft rounded-2xl p-3 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-card text-primary flex items-center justify-center"><Stethoscope className="w-5 h-5" /></div>
@@ -258,36 +257,26 @@ function ScheduleScreen({ serviceId, date, time, location, onDate, onTime, onLoc
         <div>
           <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Select date</p>
           <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
-            {days.map((d) => {
+            {days.map((d, index) => {
               const active = d.getDate() === date;
+              const holiday = index === 5;
+              const full = index === 2;
+              const available = 40 - ((index * 7 + 15) % 35);
               return (
-                <button key={d.toISOString()} onClick={() => onDate(d.getDate())}
+                <button key={d.toISOString()} disabled={holiday || full} onClick={() => onDate(d.getDate())}
                   className={cn("min-w-[60px] flex flex-col items-center py-3 rounded-2xl border transition-smooth",
-                    active ? "bg-gradient-primary text-primary-foreground border-transparent shadow-glow" : "bg-card border-border")}>
+                    active ? "bg-gradient-primary text-primary-foreground border-transparent shadow-glow" : "bg-card border-border", (holiday || full) && "opacity-50")}>
                   <span className="text-[10px] uppercase">{d.toLocaleDateString("en", { weekday: "short" })}</span>
                   <span className="font-display font-bold text-lg">{d.getDate()}</span>
                   <span className="text-[10px]">{d.toLocaleDateString("en", { month: "short" })}</span>
+                  <span className="text-[9px] mt-1">{holiday ? "Closed" : full ? "Full" : `${available} slots`}</span>
                 </button>
               );
             })}
           </div>
         </div>
 
-        <div>
-          <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Available time slots</p>
-          <div className="grid grid-cols-3 gap-2">
-            {slots.map((s) => {
-              const active = s === time;
-              return (
-                <button key={s} onClick={() => onTime(s)}
-                  className={cn("py-2.5 rounded-xl text-xs font-medium border transition-smooth",
-                    active ? "bg-primary text-primary-foreground border-transparent shadow-soft" : "bg-card border-border text-foreground")}>
-                  {s}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <div className="bg-muted/50 rounded-2xl p-3 text-xs text-muted-foreground">Choose an available date only. Clinic consultation hours are 8:00 AM – 5:00 PM; your queue number is assigned after clinic check-in.</div>
 
         <div>
           <div className="mb-2 flex items-end justify-between gap-2">
@@ -314,9 +303,8 @@ function ScheduleScreen({ serviceId, date, time, location, onDate, onTime, onLoc
   );
 }
 
-function ConfirmScreen({ serviceId, time, location, onDone }: any) {
+function ConfirmScreen({ serviceId, date, location, onDone }: any) {
   const svc = helpers.getService(serviceId);
-  const queue = "A-009";
   return (
     <div className="p-6 pt-10 flex flex-col items-center text-center min-h-full bg-background">
       <div className="w-24 h-24 rounded-full bg-secondary-soft flex items-center justify-center mb-4 animate-pop-in">
@@ -326,26 +314,16 @@ function ConfirmScreen({ serviceId, time, location, onDone }: any) {
       <p className="text-sm text-muted-foreground mb-6">A reminder will be sent to your phone.</p>
 
       <div className="w-full bg-gradient-primary text-primary-foreground rounded-3xl p-6 shadow-glow">
-        <p className="text-xs uppercase opacity-80">Your queue number</p>
-        <p className="font-display font-extrabold text-5xl tracking-tight my-1">{queue}</p>
+        <p className="text-xs uppercase opacity-80">Booking reference</p>
+        <p className="font-display font-extrabold text-3xl tracking-tight my-2">APT-2026-0098</p>
         <div className="border-t border-primary-foreground/20 my-3" />
         <div className="grid grid-cols-2 gap-2 text-left text-sm">
           <div>
             <p className="text-[10px] opacity-70 uppercase">Service</p>
             <p className="font-semibold truncate">{svc.name}</p>
           </div>
-          <div>
-            <p className="text-[10px] opacity-70 uppercase">Time</p>
-            <p className="font-semibold">{time}</p>
-          </div>
-          <div>
-            <p className="text-[10px] opacity-70 uppercase">Room</p>
-            <p className="font-semibold">Room 1</p>
-          </div>
-          <div>
-            <p className="text-[10px] opacity-70 uppercase">Est. wait</p>
-            <p className="font-semibold">~25 min</p>
-          </div>
+          <div><p className="text-[10px] opacity-70 uppercase">Date</p><p className="font-semibold">{new Date(new Date().getFullYear(), new Date().getMonth(), date).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}</p></div>
+          <div><p className="text-[10px] opacity-70 uppercase">Status</p><p className="font-semibold">Confirmed</p></div>
         </div>
       </div>
 
@@ -353,7 +331,7 @@ function ConfirmScreen({ serviceId, time, location, onDone }: any) {
         <div className="flex gap-2"><MapPin className="w-4 h-4 text-primary shrink-0" /><span>Super Health Center, Jones, Isabela</span></div>
         <div className="flex gap-2"><MapPin className="w-4 h-4 text-secondary shrink-0" /><span>Patient location saved ({location.latitude.toFixed(4)}, {location.longitude.toFixed(4)})</span></div>
         <div className="flex gap-2"><Phone className="w-4 h-4 text-primary shrink-0" /><span>(078) 000-0000</span></div>
-        <div className="flex gap-2"><Clock className="w-4 h-4 text-primary shrink-0" /><span>Please arrive 15 minutes before your slot.</span></div>
+        <div className="flex gap-2"><Clock className="w-4 h-4 text-primary shrink-0" /><span>Clinic consultation hours: 8:00 AM – 5:00 PM. Present your booking reference when checking in.</span></div>
       </div>
 
       <Button onClick={onDone} className="w-full mt-5 h-12 rounded-2xl">View my appointments</Button>
@@ -373,7 +351,7 @@ function MyAppointmentsScreen({ onBack }: { onBack: () => void }) {
           return (
             <div key={a.id} className="bg-card border border-border rounded-2xl p-4 shadow-soft">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-display font-bold text-primary">{a.queueNumber}</span>
+                <span className="font-display font-bold text-primary">APT-2026-00{a.id.slice(1)}</span>
                 <Badge className={cn("border-0",
                   a.queueStatus === "Now Serving" && "bg-secondary text-secondary-foreground",
                   a.queueStatus === "Waiting" && "bg-warning/20 text-warning",
@@ -382,7 +360,8 @@ function MyAppointmentsScreen({ onBack }: { onBack: () => void }) {
                 )}>{a.queueStatus}</Badge>
               </div>
               <p className="font-semibold text-sm">{svc.name}</p>
-              <p className="text-xs text-muted-foreground">{helpers.formatDate(a.date)} · {a.timeSlot} · {a.room}</p>
+              <p className="text-xs text-muted-foreground">{helpers.formatDate(a.date)} · Appointment {a.queueStatus === "Scheduled" ? "Confirmed" : a.attendanceStatus === "Present" ? "Arrived" : a.queueStatus}</p>
+              {a.attendanceStatus === "Present" && <p className="text-xs text-primary mt-2">Queue {a.queueNumber} · {a.queueStatus === "Waiting" ? "Waiting for triage" : a.queueStatus}</p>}
               {isLive && (
                 <div className="mt-3 p-2 bg-secondary-soft rounded-xl text-xs text-secondary flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-secondary animate-pulse" />
@@ -392,6 +371,20 @@ function MyAppointmentsScreen({ onBack }: { onBack: () => void }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function MedicalRecordsScreen({ onBack }: { onBack: () => void }) {
+  const records = medicalRecords.filter((record) => record.patientId === patients[0].id);
+  return (
+    <div>
+      <ScreenHeader title="My medical records" onBack={onBack} />
+      <div className="p-5 space-y-3">
+        <div className="bg-primary-soft border border-primary/15 rounded-2xl p-4"><p className="font-semibold text-sm">Your private health history</p><p className="text-xs text-muted-foreground mt-1">This demo shows records approved for the patient portal. In the live system, access requires secure sign-in and consent.</p></div>
+        {records.map((record) => <div key={record.id} className="bg-card border border-border rounded-2xl p-4 shadow-soft"><div className="flex justify-between gap-2"><p className="font-semibold text-sm">{record.diagnosis}</p><Badge className="bg-secondary-soft text-secondary border-0">Consultation completed</Badge></div><p className="text-[10px] text-muted-foreground mt-1">{record.date} · {record.clinician}</p><p className="text-xs mt-3">{record.notes}</p><p className="text-xs text-muted-foreground mt-3 pt-3 border-t border-border">Follow the doctor’s clinic-approved instructions. Pharmacy dispensing history is recorded separately when applicable.</p></div>)}
+        <p className="text-[10px] text-muted-foreground text-center">For corrections or older paper records, please contact the clinic records desk.</p>
       </div>
     </div>
   );
@@ -446,6 +439,7 @@ function BottomNav({ screen, setScreen }: { screen: Screen; setScreen: (s: Scree
     { id: "home",    icon: Home,       label: "Home"    },
     { id: "services",icon: Calendar,   label: "Book"    },
     { id: "myAppts", icon: ListChecks, label: "Queue"   },
+    { id: "records", icon: FileText,   label: "Records" },
     { id: "notif",   icon: Bell,       label: "Alerts"  },
   ];
   return (

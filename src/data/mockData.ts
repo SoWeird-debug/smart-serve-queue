@@ -1,9 +1,9 @@
 // SmartServe mock data – Super Health Center of Jones, Isabela
 // Structured to be swappable with Firebase/Firestore later.
 
-export type Role = "patient" | "staff" | "admin";
+export type Role = "patient" | "staff" | "doctor" | "pharmacy" | "admin";
 
-export type QueueStatus = "Waiting" | "Now Serving" | "Completed" | "No Show" | "Scheduled";
+export type QueueStatus = "Waiting" | "Waiting for Triage" | "Triage" | "Waiting for Doctor" | "Called" | "In Consultation" | "Now Serving" | "Completed" | "Consultation Completed" | "No Show" | "Scheduled";
 export type AttendanceStatus = "Pending" | "Present" | "Absent";
 
 export interface Service {
@@ -62,6 +62,28 @@ export interface ResourceItem {
   current: number;
   forecast: number;
   unit: string;
+}
+
+export interface MedicineItem {
+  id: string;
+  name: string;
+  strength: string;
+  form: string;
+  stock: number;
+  reorderLevel: number;
+  expiry: string;
+  batch: string;
+}
+
+export interface MedicalRecord {
+  id: string;
+  patientId: string;
+  date: string;
+  clinician: string;
+  diagnosis: string;
+  notes: string;
+  prescription: { medicineId: string; quantity: number; instructions: string }[];
+  status: "Prescribed" | "Ready for pickup" | "Partially dispensed" | "Dispensed";
 }
 
 export interface NotificationItem {
@@ -128,10 +150,22 @@ export const resources: ResourceItem[] = [
   { id: "r7", name: "Surgical Masks",      type: "Supplies",  current: 800, forecast: 1500, unit: "pcs" },
 ];
 
+export const medicines: MedicineItem[] = [
+  { id: "m1", name: "Paracetamol", strength: "500 mg", form: "Tablet", stock: 1200, reorderLevel: 500, expiry: "2027-04-30", batch: "PCM-2407" },
+  { id: "m2", name: "Amoxicillin", strength: "500 mg", form: "Capsule", stock: 320, reorderLevel: 400, expiry: "2026-12-15", batch: "AMX-2411" },
+  { id: "m3", name: "Losartan", strength: "50 mg", form: "Tablet", stock: 86, reorderLevel: 150, expiry: "2026-10-31", batch: "LOS-2403" },
+  { id: "m4", name: "Oral Rehydration Salts", strength: "", form: "Sachet", stock: 540, reorderLevel: 200, expiry: "2027-02-28", batch: "ORS-2408" },
+];
+
+export const medicalRecords: MedicalRecord[] = [
+  { id: "mr1", patientId: "p1", date: today, clinician: "Dr. Joseph Mariano", diagnosis: "Acute upper respiratory infection", notes: "No known drug allergies. Advise rest and adequate fluids.", prescription: [{ medicineId: "m1", quantity: 12, instructions: "Take 1 tablet every 6 hours as needed for fever." }], status: "Ready for pickup" },
+  { id: "mr2", patientId: "p1", date: "2026-06-11", clinician: "Dr. Joseph Mariano", diagnosis: "Hypertension follow-up", notes: "Blood pressure controlled; continue maintenance medication.", prescription: [{ medicineId: "m3", quantity: 30, instructions: "Take 1 tablet once daily." }], status: "Dispensed" },
+];
+
 export const notifications: NotificationItem[] = [
-  { id: "n1", title: "Appointment Reminder",  message: "Your General Consultation is tomorrow at 9:30 AM. Please arrive 15 minutes early.", time: "2h ago", read: false, type: "reminder" },
-  { id: "n2", title: "Queue Update",          message: "You are 3rd in line. Estimated wait: 25 minutes.",                                  time: "10m ago", read: false, type: "update"   },
-  { id: "n3", title: "Booking Confirmed",     message: "Queue number A-007 assigned for Nov 12, 11:00 AM.",                                 time: "1d ago",  read: true,  type: "update"   },
+  { id: "n1", title: "Appointment Reminder",  message: "Your General Consultation is tomorrow. Clinic consultation hours are 8:00 AM – 5:00 PM.", time: "2h ago", read: false, type: "reminder" },
+  { id: "n2", title: "Queue Update",          message: "You are checked in. Queue A-009 is waiting for triage.",                              time: "10m ago", read: false, type: "update"   },
+  { id: "n3", title: "Booking Confirmed",     message: "Booking reference APT-2026-0098 is confirmed. Present it when checking in.",          time: "1d ago",  read: true,  type: "update"   },
   { id: "n4", title: "Health Advisory",       message: "Flu vaccines are now available. Walk-ins accepted Mon-Fri.",                        time: "2d ago",  read: true,  type: "alert"    },
 ];
 
