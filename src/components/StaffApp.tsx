@@ -1,319 +1,39 @@
-import { useEffect, useState } from "react";
-import {
-  Activity, CheckCircle2, Clock, MonitorPlay, RefreshCw, Users,
-  UserCheck, SkipForward, Phone, ChevronRight, DoorOpen, ClipboardPlus, UserPlus,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Activity, ClipboardPlus, Clock, MapPin, MonitorPlay, Phone, UserCheck, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { appointments as initial, helpers } from "@/data/mockData";
-import type { Appointment } from "@/data/mockData";
+import { services, type Appointment, type Patient } from "@/data/mockData";
+import { LocationPickerMap, type PinnedLocation } from "@/components/LocationPickerMap";
+import { usePrototypeStore } from "@/lib/prototype-store";
 
-type Tab = "tv" | "attendance" | "triage" | "control";
+type Tab = "board" | "checkin" | "intake" | "queue";
+const label = (patients: Patient[], id: string) => patients.find(p => p.id === id)?.fullName || "Unknown patient";
+const pinFromAddress = (address: string) => { let h = 0; for (let i = 0; i < address.length; i += 1) h = (h * 31 + address.charCodeAt(i)) | 0; return { latitude: 16.5613 + ((h % 900) / 100000), longitude: 121.7023 + (((h >> 8) % 900) / 100000) }; };
+async function geocodeAddress(address: string): Promise<PinnedLocation> { const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=ph&q=${encodeURIComponent(address)}`); const results = await response.json(); if (!results[0]) throw new Error("Address not found"); return { latitude: Number(results[0].lat), longitude: Number(results[0].lon) }; }
 
 export function StaffApp() {
-  const [tab, setTab] = useState<Tab>("tv");
-  const [appts, setAppts] = useState<Appointment[]>(initial);
-  const [now, setNow] = useState(new Date());
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const update = (id: string, patch: Partial<Appointment>) =>
-    setAppts((arr) => arr.map((a) => (a.id === id ? { ...a, ...patch } : a)));
-
-  return (
-    <div className="space-y-6">
-      <div className="text-center max-w-2xl mx-auto">
-        <Badge variant="secondary" className="mb-2 bg-secondary-soft text-secondary border-0">Onsite Workplace</Badge>
-        <h2 className="text-2xl md:text-3xl font-display font-bold">Tablet & TV queueing tools</h2>
-        <p className="text-muted-foreground text-sm mt-1">Cast the queue board to a TV, manage attendance and call patients in real time.</p>
-      </div>
-
-      <div className="flex justify-center">
-        <div className="inline-flex p-1 bg-muted rounded-2xl">
-          {[
-            { id: "tv" as Tab,         label: "TV Queue Board", icon: MonitorPlay },
-            { id: "attendance" as Tab, label: "Check-in",       icon: UserCheck   },
-            { id: "triage" as Tab,     label: "Triage",         icon: ClipboardPlus },
-            { id: "control" as Tab,    label: "Queue Control",  icon: Activity    },
-          ].map((t) => {
-            const Icon = t.icon;
-            const active = tab === t.id;
-            return (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                className={cn("flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-smooth",
-                  active ? "bg-card text-primary shadow-soft" : "text-muted-foreground")}>
-                <Icon className="w-4 h-4" /> {t.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {tab === "tv" && <TVBoard appts={appts} now={now} />}
-      {tab === "attendance" && <AttendanceScreen appts={appts} update={update} />}
-      {tab === "triage" && <TriageScreen />}
-      {tab === "control" && <QueueControl appts={appts} update={update} />}
-    </div>
-  );
+  const [tab, setTab] = useState<Tab>("board"); const [now, setNow] = useState(new Date()); const store = usePrototypeStore();
+  useEffect(() => { const timer = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(timer); }, []);
+  const tabs = [{ id: "board" as Tab, label: "TV Queue Board", icon: MonitorPlay }, { id: "checkin" as Tab, label: "Scheduled Check-in", icon: UserCheck }, { id: "intake" as Tab, label: "Onsite Intake & Triage", icon: ClipboardPlus }, { id: "queue" as Tab, label: "Queue Control", icon: Activity }];
+  return <div className="space-y-6"><div className="text-center max-w-3xl mx-auto"><Badge variant="secondary" className="mb-2 bg-secondary-soft text-secondary border-0">Onsite clinic workspace · local prototype</Badge><h2 className="text-2xl md:text-3xl font-display font-bold">One secure intake flow for booked and walk-in patients</h2><p className="text-muted-foreground text-sm mt-1">Staff handle names privately; the TV shows queue numbers only. Address entry automatically creates a disease-trend location pin.</p></div><div className="flex justify-center"><div className="inline-flex flex-wrap justify-center p-1 bg-muted rounded-2xl">{tabs.map(t => { const Icon = t.icon; return <button key={t.id} onClick={() => setTab(t.id)} className={cn("flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium", tab === t.id ? "bg-card text-primary shadow-soft" : "text-muted-foreground")}><Icon className="w-4 h-4" />{t.label}</button>; })}</div></div>{tab === "board" && <Board appts={store.appointments} now={now} />}{tab === "checkin" && <Checkin appts={store.appointments} patients={store.patients} checkIn={store.checkIn} markAbsent={store.markAbsent} />}{tab === "intake" && <OnsiteIntake />}{tab === "queue" && <Queue appts={store.appointments} patients={store.patients} call={store.callNext} send={store.sendToDoctor} absent={store.markAbsent} />}</div>;
 }
 
-function TriageScreen() {
-  const [saved, setSaved] = useState(false);
-  return <div className="max-w-3xl mx-auto bg-card border border-border rounded-2xl p-5 shadow-soft"><div className="flex items-center gap-2 mb-5"><ClipboardPlus className="w-5 h-5 text-primary" /><div><h3 className="font-display font-bold text-lg">Triage & vital signs</h3><p className="text-sm text-muted-foreground">Complete this before the patient is sent to the doctor.</p></div></div><div className="grid md:grid-cols-2 gap-4"><div><Label>Patient</Label><select className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm">{initial.slice(0, 5).map((a) => <option key={a.id}>{helpers.getPatient(a.patientId).fullName} · {a.queueNumber}</option>)}</select></div><div><Label>Triage priority</Label><select className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>Normal</option><option>Priority</option><option>Urgent</option><option>Emergency</option></select></div><div><Label>Blood pressure</Label><Input className="mt-1" placeholder="120 / 80 mmHg" /></div><div><Label>Temperature</Label><Input className="mt-1" placeholder="36.8 °C" /></div><div><Label>Pulse / respiratory rate</Label><Input className="mt-1" placeholder="72 bpm / 16 rpm" /></div><div><Label>Known allergies</Label><Input className="mt-1" placeholder="None known" /></div></div><div className="mt-4"><Label>Chief complaint / initial assessment</Label><Textarea className="mt-1" placeholder="Patient's reason for visit and observations" /></div><div className="flex flex-wrap gap-3 mt-5"><Button onClick={() => setSaved(true)}><ClipboardPlus className="w-4 h-4 mr-2" />Complete triage</Button><Button variant="outline"><UserPlus className="w-4 h-4 mr-2" />Register walk-in</Button></div>{saved && <p className="text-sm text-secondary mt-3">Triage recorded in this prototype. Patient status is ready for the doctor queue; emergencies require immediate care or referral.</p>}</div>;
-}
+function Board({ appts, now }: { appts: Appointment[]; now: Date }) { const active = appts.filter(a => ["Waiting for Triage", "Waiting for Doctor", "Called"].includes(a.queueStatus)); const called = active.filter(a => a.queueStatus === "Called"); return <div className="tv-frame max-w-[1200px]"><div className="bg-gradient-tv text-primary-foreground p-6 md:p-8"><div className="flex justify-between mb-6"><div><h2 className="font-display font-extrabold text-xl md:text-2xl">SUPER HEALTH CENTER</h2><p className="text-xs text-primary-foreground/60 uppercase">Jones, Isabela · privacy-safe live queue</p></div><p className="font-display font-bold text-2xl">{now.toLocaleTimeString("en-PH", { hour:"2-digit", minute:"2-digit" })}</p></div><div className="grid md:grid-cols-2 gap-4 mb-6">{called.length ? called.map(a => <div key={a.id} className="bg-gradient-primary rounded-2xl p-6 shadow-glow"><p className="text-xs uppercase opacity-80">Now serving</p><p className="font-display font-extrabold text-7xl my-1">{a.queueNumber}</p><p className="text-sm opacity-90">Please proceed to {a.room || "the assigned room"}</p></div>) : <div className="md:col-span-2 bg-card/5 rounded-2xl p-10 text-center text-primary-foreground/60">No queue number is currently being served.</div>}</div><div className="bg-card/5 rounded-2xl p-5"><h3 className="font-display font-bold text-lg mb-3">Up next</h3>{active.filter(a=>a.queueStatus!=="Called").map((a,i) => <div key={a.id} className="flex gap-3 bg-card/5 rounded-xl p-3 mb-2"><span className="font-display font-bold text-2xl text-secondary w-20">{a.queueNumber}</span><div><p className="font-semibold">Queue position #{i+1}</p><p className="text-xs text-primary-foreground/60">{a.queueStatus === "Waiting for Triage" ? "Triage" : "Consultation"}</p></div></div>)}{active.length===called.length && <p className="text-primary-foreground/50">Queue is clear.</p>}</div><p className="text-center text-xs text-primary-foreground/50 mt-6">Please listen for your queue number. Patient names are not displayed on this monitor.</p></div></div>; }
 
-/* ---------------- TV BOARD ---------------- */
+function Checkin({ appts, patients, checkIn, markAbsent }: any) { const [numbers, setNumbers] = useState<Record<string,string>>({}); const [error,setError]=useState(""); const scheduled=appts.filter((a:Appointment)=>a.visitType!=="Walk-in"); return <div className="bg-card border border-border rounded-2xl shadow-card overflow-hidden max-w-5xl mx-auto"><div className="p-5 border-b border-border"><h3 className="font-display font-bold text-lg">Scheduled patient check-in</h3><p className="text-sm text-muted-foreground">Verify the booking and identity privately, then input the physical number issued to the patient.</p>{error&&<p className="text-sm text-destructive mt-2">{error}</p>}</div>{scheduled.map((a:Appointment)=><div key={a.id} className="flex flex-col md:flex-row md:items-center gap-3 p-4 border-b border-border"><span className="font-display font-bold text-primary w-16">{a.queueNumber||"—"}</span><div className="flex-1"><p className="font-semibold">{label(patients,a.patientId)}</p><p className="text-xs text-muted-foreground">{services.find(s=>s.id===a.serviceId)?.name} · {a.attendanceStatus}</p></div>{a.attendanceStatus!=="Present"&&<Input value={numbers[a.id]||""} onChange={e=>setNumbers(x=>({...x,[a.id]:e.target.value}))} placeholder="001–100" className="md:w-28"/>}<Button size="sm" disabled={a.attendanceStatus==="Present"||!(numbers[a.id]||"").trim()} onClick={()=>checkIn(a.id,numbers[a.id])?setError(""):setError("Use a unique active queue number from 001 to 100.")}><UserCheck className="w-4 h-4 mr-1"/>Confirm</Button><Button size="sm" variant="outline" disabled={a.attendanceStatus==="Present"} onClick={()=>markAbsent(a.id)}>Absent</Button></div>)}</div>; }
 
-function TVBoard({ appts, now }: { appts: Appointment[]; now: Date }) {
-  const nowServing = appts.filter((a) => a.queueStatus === "Now Serving" || a.queueStatus === "Called");
-  const waiting    = appts.filter((a) => a.queueStatus === "Waiting" || a.queueStatus === "Waiting for Triage" || a.queueStatus === "Waiting for Doctor");
-  const completed  = appts.filter((a) => a.queueStatus === "Completed" || a.queueStatus === "Consultation Completed").length;
-  const noShow     = appts.filter((a) => a.queueStatus === "No Show").length;
+function OnsiteIntake(){ const [mode,setMode]=useState<"triage"|"register"|"walkin">("triage"); return <div className="max-w-5xl mx-auto"><div className="grid md:grid-cols-3 gap-3 mb-5"><Action active={mode==="triage"} icon={ClipboardPlus} title="Vitals & send to doctor" description="Complete triage for an active patient." onClick={()=>setMode("triage")}/><Action active={mode==="register"} icon={UserPlus} title="Register new patient" description="Create a permanent patient record and address pin." onClick={()=>setMode("register")}/><Action active={mode==="walkin"} icon={Users} title="Add registered walk-in" description="Find an existing patient and issue a queue number." onClick={()=>setMode("walkin")}/></div>{mode==="triage"&&<TriageForm/>}{mode==="register"&&<RegistrationForm onRegistered={()=>setMode("walkin")}/>} {mode==="walkin"&&<WalkInForm/>}</div>;}
+function Action({active,icon:Icon,title,description,onClick}:any){return <button onClick={onClick} className={cn("text-left rounded-2xl border p-4 transition-smooth",active?"border-primary bg-primary-soft shadow-soft":"border-border bg-card hover:bg-muted/50")}><Icon className="w-5 h-5 text-primary mb-3"/><p className="font-display font-bold">{title}</p><p className="text-xs text-muted-foreground mt-1">{description}</p></button>;}
 
-  return (
-    <div className="tv-frame max-w-[1200px]">
-      <div className="bg-gradient-tv text-primary-foreground p-6 md:p-8">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow">
-              <MonitorPlay className="w-6 h-6 text-primary-foreground" />
-            </div>
-            <div>
-              <h2 className="font-display font-extrabold text-xl md:text-2xl">SUPER HEALTH CENTER</h2>
-              <p className="text-xs text-primary-foreground/60 uppercase tracking-wider">Jones, Isabela · Live Queue</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="font-display font-bold text-2xl md:text-3xl tabular-nums">
-              {now.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-            </p>
-            <p className="text-xs text-primary-foreground/60">{now.toLocaleDateString("en-PH", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
-          </div>
-        </div>
+function RegistrationForm({onRegistered}:{onRegistered:()=>void}){const {registerPatient}=usePrototypeStore();const [form,setForm]=useState({fullName:"",middleName:"",dob:"",gender:"Female" as "Female"|"Male",contact:"",alternateContact:"",addressLine:"",barangay:"",municipality:"Jones",civilStatus:"",nationality:"Filipino",emergencyContactName:"",emergencyContactRelationship:"",emergencyContactPhone:"",consentToTreatment:false,privacyAcknowledged:false});const [pin,setPin]=useState<PinnedLocation|null>(null);const [pinStatus,setPinStatus]=useState("Enter address details to auto-pin the residence.");const address=[form.addressLine,form.barangay,form.municipality,"Isabela, Philippines"].filter(Boolean).join(", ");useEffect(()=>{if(!form.barangay||!form.municipality)return;let active=true;setPinStatus("Finding address on map…");geocodeAddress(address).then(next=>{if(active){setPin(next);setPinStatus("Address found and pinned automatically.");}}).catch(()=>{if(active){setPin(pinFromAddress(address));setPinStatus("Exact address was not found; an estimated local pin was added. Confirm or correct it with the patient.");}});return()=>{active=false;};},[address,form.barangay,form.municipality]);const set=(key:string,value:any)=>setForm(f=>({...f,[key]:value}));const submit=()=>{if(!form.fullName||!form.dob||!form.contact||!form.barangay||!pin||!form.consentToTreatment||!form.privacyAcknowledged)return;registerPatient({...form,address:address,latitude:pin.latitude,longitude:pin.longitude,locationSource:"Auto-pinned from address"});onRegistered();};return <section className="bg-card border border-border rounded-2xl p-5 shadow-soft"><h3 className="font-display font-bold text-lg">Manual patient registration</h3><p className="text-sm text-muted-foreground mb-5">Complete this with the patient. The address automatically creates a residence pin; staff may correct it on the map.</p><div className="grid md:grid-cols-2 gap-4">{([['fullName','Full legal name'],['middleName','Middle name (optional)'],['dob','Date of birth'],['contact','Mobile number'],['alternateContact','Alternate number (optional)'],['civilStatus','Civil status'],['nationality','Nationality'],['emergencyContactName','Emergency contact name'],['emergencyContactRelationship','Emergency contact relationship'],['emergencyContactPhone','Emergency contact number'],['addressLine','House no., street, purok / sitio'],['barangay','Barangay'],['municipality','Municipality / city']] as const).map(([key,title])=><div key={key}><Label>{title}</Label><Input type={key==='dob'?"date":"text"} value={(form as any)[key]} onChange={e=>set(key,e.target.value)} className="mt-1"/></div>)}<div><Label>Sex</Label><select value={form.gender} onChange={e=>set('gender',e.target.value)} className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>Female</option><option>Male</option></select></div></div><div className="mt-5"><div className="flex items-center gap-2 mb-2"><MapPin className="w-4 h-4 text-primary"/><Label>Residence location — auto-pinned from entered address</Label></div><LocationPickerMap value={pin} onChange={next=>{setPin(next);setPinStatus("Pin adjusted and verified by staff.");}}/><p className="mt-2 text-xs text-muted-foreground">{pinStatus}</p>{pin&&<p className="mt-1 text-xs text-muted-foreground">Pin: {pin.latitude.toFixed(5)}, {pin.longitude.toFixed(5)}. Tap map only to correct it with the patient.</p>}</div><div className="flex gap-2 mt-5 text-sm"><input type="checkbox" checked={form.consentToTreatment} onChange={e=>set('consentToTreatment',e.target.checked)}/><span>Patient/guardian consent to treatment was verified.</span></div><div className="flex gap-2 mt-2 text-sm"><input type="checkbox" checked={form.privacyAcknowledged} onChange={e=>set('privacyAcknowledged',e.target.checked)}/><span>Privacy notice was acknowledged.</span></div><Button disabled={!form.fullName||!form.dob||!form.contact||!form.barangay||!pin||!form.consentToTreatment||!form.privacyAcknowledged} onClick={submit} className="mt-5"><UserPlus className="w-4 h-4 mr-2"/>Save patient & continue to walk-in</Button></section>;}
 
-        {/* Now Serving giant cards */}
-        <div className="grid md:grid-cols-2 gap-4 mb-6">
-          {nowServing.length === 0 && (
-            <div className="md:col-span-2 bg-card/5 border border-card/10 rounded-2xl p-10 text-center text-primary-foreground/60">
-              No patient currently being served.
-            </div>
-          )}
-          {nowServing.map((a) => {
-            const p = helpers.getPatient(a.patientId);
-            const s = helpers.getService(a.serviceId);
-            return (
-              <div key={a.id} className="bg-gradient-primary rounded-2xl p-6 shadow-glow relative overflow-hidden">
-                <div className="absolute -top-10 -right-10 w-40 h-40 bg-card/10 rounded-full" />
-                <p className="text-xs uppercase opacity-80 font-semibold tracking-wider">Now Serving</p>
-                <p className="font-display font-extrabold text-6xl md:text-7xl tracking-tight my-1">{a.queueNumber}</p>
-                <p className="text-2xl font-semibold">{p.maskedName}</p>
-                <div className="flex items-center justify-between mt-3 text-sm">
-                  <span className="bg-card/20 backdrop-blur rounded-full px-3 py-1">{s.name}</span>
-                  <span className="flex items-center gap-1.5 font-bold"><DoorOpen className="w-4 h-4" /> {a.room}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+function WalkInForm(){const {patients,addWalkIn}=usePrototypeStore();const [query,setQuery]=useState("");const [patientId,setPatientId]=useState("");const [serviceId,setServiceId]=useState("s1");const [number,setNumber]=useState("");const [reason,setReason]=useState("");const [message,setMessage]=useState("");const matches=useMemo(()=>patients.filter(p=>`${p.fullName} ${p.patientNumber||""} ${p.contact} ${p.dob}`.toLowerCase().includes(query.toLowerCase())).slice(0,6),[patients,query]);return <section className="bg-card border border-border rounded-2xl p-5 shadow-soft"><h3 className="font-display font-bold text-lg">Add registered walk-in visit</h3><p className="text-sm text-muted-foreground mb-5">Search first to prevent duplicate registrations. This creates today’s visit and places the patient in the triage queue.</p><Label>Search patient by name, patient ID, mobile number, or birth date</Label><Input value={query} onChange={e=>{setQuery(e.target.value);setPatientId("")}} placeholder="Search existing patient" className="mt-1"/>{query&&<div className="border border-border rounded-xl mt-2 overflow-hidden">{matches.map(p=><button key={p.id} onClick={()=>{setPatientId(p.id);setQuery(`${p.fullName} · ${p.patientNumber||""}`)}} className={cn("w-full text-left p-3 border-b border-border last:border-0",patientId===p.id&&"bg-primary-soft")}><p className="font-medium text-sm">{p.fullName}</p><p className="text-xs text-muted-foreground">{p.patientNumber||"Existing patient"} · {p.dob} · {p.barangay}</p></button>)}{!matches.length&&<p className="p-3 text-sm text-muted-foreground">No record found. Use Register new patient.</p>}</div>}<div className="grid md:grid-cols-2 gap-4 mt-4"><div><Label>Requested service</Label><select value={serviceId} onChange={e=>setServiceId(e.target.value)} className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm">{services.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div><div><Label>Physical queue number</Label><Input value={number} onChange={e=>setNumber(e.target.value.replace(/\D/g,"").slice(0,3))} placeholder="001–100" className="mt-1"/></div></div><div className="mt-4"><Label>Reason for visit</Label><Textarea value={reason} onChange={e=>setReason(e.target.value)} placeholder="Patient's reason for visit" className="mt-1"/></div><Button disabled={!patientId||!number||!reason} onClick={()=>setMessage(addWalkIn(patientId,serviceId,number,reason)?"Walk-in saved. Patient is now waiting for triage.":"Queue number must be 001–100 and cannot be active already.")} className="mt-5"><Users className="w-4 h-4 mr-2"/>Add walk-in to queue</Button>{message&&<p className={cn("mt-3 text-sm",message.startsWith("Walk")?"text-secondary":"text-destructive")}>{message}</p>}</section>;}
 
-        {/* Waiting + stats */}
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="md:col-span-2 bg-card/5 border border-card/10 rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-display font-bold text-lg">Up Next</h3>
-              <div className="flex items-center gap-1.5 text-xs text-secondary">
-                <RefreshCw className="w-3 h-3 animate-spin" /> Live
-              </div>
-            </div>
-            <div className="space-y-2">
-              {waiting.length === 0 && <p className="text-primary-foreground/50 text-sm">Queue is clear.</p>}
-              {waiting.map((a, i) => {
-                const p = helpers.getPatient(a.patientId);
-                const s = helpers.getService(a.serviceId);
-                return (
-                  <div key={a.id} className="flex items-center gap-3 bg-card/5 rounded-xl p-3 hover:bg-card/10 transition-smooth">
-                    <span className="font-display font-bold text-2xl text-secondary w-20">{a.queueNumber}</span>
-                    <div className="flex-1">
-                      <p className="font-semibold">{p.maskedName}</p>
-                      <p className="text-xs text-primary-foreground/60">{s.name} · {a.timeSlot}</p>
-                    </div>
-                    <Badge className="bg-warning/20 text-warning border-0">#{i + 1}</Badge>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+function TriageForm(){const {appointments,patients,completeTriage}=usePrototypeStore();const eligible=appointments.filter(a=>a.queueStatus==="Waiting for Triage");const [id,setId]=useState("");const [priority,setPriority]=useState<"Normal"|"Priority"|"Urgent"|"Emergency">("Normal");const [f,setF]=useState({bloodPressure:"",temperature:"",pulseRespiratory:"",allergies:"",complaint:""});useEffect(()=>{if(!eligible.some(a=>a.id===id))setId(eligible[0]?.id||"");},[eligible,id]);return <section className="bg-card border border-border rounded-2xl p-5 shadow-soft"><h3 className="font-display font-bold text-lg">Vitals & triage handoff</h3><p className="text-sm text-muted-foreground mb-5">Scheduled and walk-in patients appear together once they have a valid active queue number.</p><div className="grid md:grid-cols-2 gap-4"><div><Label>Active patient</Label><select value={id} onChange={e=>setId(e.target.value)} className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Select patient</option>{eligible.map(a=><option key={a.id} value={a.id}>{a.queueNumber} · {label(patients,a.patientId)} · {a.visitType||"Scheduled"}</option>)}</select></div><div><Label>Priority</Label><select value={priority} onChange={e=>setPriority(e.target.value as typeof priority)} className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>Normal</option><option>Priority</option><option>Urgent</option><option>Emergency</option></select></div>{([['bloodPressure','Blood pressure'],['temperature','Temperature'],['pulseRespiratory','Pulse / respiratory rate'],['allergies','Known allergies']] as const).map(([key,title])=><div key={key}><Label>{title}</Label><Input value={f[key]} onChange={e=>setF(x=>({...x,[key]:e.target.value}))} className="mt-1"/></div>)}</div><div className="mt-4"><Label>Chief complaint / initial assessment</Label><Textarea value={f.complaint} onChange={e=>setF(x=>({...x,complaint:e.target.value}))} className="mt-1"/></div><Button disabled={!id} onClick={()=>{completeTriage({appointmentId:id,priority,...f});setF({bloodPressure:"",temperature:"",pulseRespiratory:"",allergies:"",complaint:""});}} className="mt-5"><ClipboardPlus className="w-4 h-4 mr-2"/>Complete triage & send to doctor</Button></section>;}
 
-          <div className="grid grid-cols-2 md:grid-cols-1 gap-3">
-            <StatTile label="Waiting"   value={waiting.length} icon={Clock}        color="text-warning" />
-            <StatTile label="Completed" value={completed}      icon={CheckCircle2} color="text-secondary" />
-            <StatTile label="No Show"   value={noShow}         icon={SkipForward}  color="text-destructive" />
-            <StatTile label="Total"     value={appts.length}   icon={Users}        color="text-accent" />
-          </div>
-        </div>
-
-        <p className="text-center text-xs text-primary-foreground/50 mt-6">Please listen for your queue number to be called.</p>
-      </div>
-    </div>
-  );
-}
-
-function StatTile({ label, value, icon: Icon, color }: any) {
-  return (
-    <div className="bg-card/5 border border-card/10 rounded-2xl p-4">
-      <Icon className={cn("w-5 h-5 mb-2", color)} />
-      <p className="font-display font-extrabold text-3xl text-primary-foreground tabular-nums">{value}</p>
-      <p className="text-xs text-primary-foreground/60">{label}</p>
-    </div>
-  );
-}
-
-/* ---------------- ATTENDANCE ---------------- */
-
-function AttendanceScreen({ appts, update }: any) {
-  return (
-    <div className="bg-card border border-border rounded-2xl shadow-card overflow-hidden max-w-5xl mx-auto">
-      <div className="p-5 border-b border-border bg-muted/30">
-        <h3 className="font-display font-bold text-lg">Patient Check-in</h3>
-        <p className="text-sm text-muted-foreground">Mark scheduled patients as present when they arrive.</p>
-      </div>
-      <div className="divide-y divide-border">
-        {appts.map((a: Appointment) => {
-          const p = helpers.getPatient(a.patientId);
-          const s = helpers.getService(a.serviceId);
-          return (
-            <div key={a.id} className="flex flex-col md:flex-row md:items-center gap-3 p-4 hover:bg-muted/20 transition-smooth">
-              <span className="font-display font-bold text-primary text-lg w-20">{a.queueNumber}</span>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold">{p.fullName}</p>
-                <p className="text-xs text-muted-foreground">{s.name} · {a.timeSlot} · {a.room}</p>
-              </div>
-              <Badge className={cn("border-0",
-                a.attendanceStatus === "Present" && "bg-secondary-soft text-secondary",
-                a.attendanceStatus === "Pending" && "bg-warning/15 text-warning",
-                a.attendanceStatus === "Absent"  && "bg-destructive/15 text-destructive",
-              )}>{a.attendanceStatus}</Badge>
-              <div className="flex gap-2">
-                <Button size="sm" variant={a.attendanceStatus === "Present" ? "default" : "outline"}
-                  onClick={() => update(a.id, { attendanceStatus: "Present", queueStatus: a.queueStatus === "Scheduled" ? "Waiting for Triage" : a.queueStatus })}>
-                  <UserCheck className="w-4 h-4 mr-1" /> Check in
-                </Button>
-                <Button size="sm" variant="outline"
-                  onClick={() => update(a.id, { attendanceStatus: "Absent", queueStatus: "No Show" })}>
-                  Absent
-                </Button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- QUEUE CONTROL ---------------- */
-
-function QueueControl({ appts, update }: any) {
-  const waiting = appts.filter((a: Appointment) => a.queueStatus === "Waiting" || a.queueStatus === "Waiting for Triage" || a.queueStatus === "Waiting for Doctor");
-  const serving = appts.find((a: Appointment) => a.queueStatus === "Called" || a.queueStatus === "Now Serving");
-
-  const callNext = () => {
-    if (waiting[0]) update(waiting[0].id, { queueStatus: "Called" });
-  };
-
-  return (
-    <div className="grid md:grid-cols-3 gap-4 max-w-5xl mx-auto">
-      <div className="md:col-span-2 space-y-4">
-        <div className="bg-gradient-primary text-primary-foreground rounded-2xl p-6 shadow-glow">
-          <p className="text-xs uppercase opacity-80">Currently serving</p>
-          {serving ? (
-            <>
-              <p className="font-display font-extrabold text-5xl my-1">{serving.queueNumber}</p>
-              <p className="font-semibold">{helpers.getPatient(serving.patientId).fullName}</p>
-              <p className="text-sm opacity-80">{helpers.getService(serving.serviceId).name} · {serving.room}</p>
-            </>
-          ) : (
-            <p className="text-2xl font-display font-bold mt-2">— No active patient —</p>
-          )}
-          <div className="flex flex-wrap gap-2 mt-4">
-            <Button onClick={callNext} className="bg-card text-primary hover:bg-card/90 border-0">
-              <Phone className="w-4 h-4 mr-2" /> Call next
-            </Button>
-            {serving && (
-              <>
-                <Button variant="outline" className="border-primary-foreground/30 text-primary-foreground hover:bg-card/10"
-                  onClick={() => update(serving.id, { queueStatus: "In Consultation" })}>
-                  <CheckCircle2 className="w-4 h-4 mr-2" /> Send to doctor
-                </Button>
-                <Button variant="outline" className="border-primary-foreground/30 text-primary-foreground hover:bg-card/10"
-                  onClick={() => update(serving.id, { queueStatus: "No Show", attendanceStatus: "Absent" })}>
-                  <SkipForward className="w-4 h-4 mr-2" /> No show
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-2xl shadow-soft">
-          <div className="p-4 border-b border-border flex items-center justify-between">
-            <h3 className="font-display font-bold">Waiting Queue</h3>
-            <span className="text-xs text-muted-foreground">{waiting.length} patient(s)</span>
-          </div>
-          <div className="divide-y divide-border">
-            {waiting.length === 0 && <p className="p-6 text-sm text-muted-foreground text-center">Queue is empty.</p>}
-            {waiting.map((a: Appointment, i: number) => {
-              const p = helpers.getPatient(a.patientId);
-              return (
-                <div key={a.id} className="flex items-center gap-3 p-3">
-                  <span className="w-6 text-center text-xs text-muted-foreground">{i + 1}</span>
-                  <span className="font-display font-bold text-primary w-16">{a.queueNumber}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm truncate">{p.fullName}</p>
-                    <p className="text-xs text-muted-foreground">{a.timeSlot} · {a.room}</p>
-                  </div>
-                  <Button size="sm" variant="ghost" onClick={() => {
-                    update(a.id, { queueStatus: "Called" });
-                  }}>
-                    Call <ChevronRight className="w-4 h-4 ml-1" />
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <div className="bg-card border border-border rounded-2xl p-4 shadow-soft">
-          <p className="text-xs text-muted-foreground uppercase">Active Counter</p>
-          <p className="font-display font-bold text-2xl">Counter 1</p>
-          <p className="text-xs text-muted-foreground">Dr. Reyes · General Consultation</p>
-        </div>
-        <StatCard label="Total today" value={appts.length} tone="primary" />
-        <StatCard label="Served"      value={appts.filter((a:Appointment)=>a.queueStatus==="Completed").length} tone="secondary" />
-        <StatCard label="No-shows"    value={appts.filter((a:Appointment)=>a.queueStatus==="No Show").length} tone="destructive" />
-      </div>
-    </div>
-  );
-}
-
-function StatCard({ label, value, tone }: { label: string; value: number; tone: "primary" | "secondary" | "destructive" }) {
-  return (
-    <div className={cn("rounded-2xl p-4 border",
-      tone === "primary"     && "bg-primary-soft border-primary/20",
-      tone === "secondary"   && "bg-secondary-soft border-secondary/20",
-      tone === "destructive" && "bg-destructive/10 border-destructive/20",
-    )}>
-      <p className="text-xs uppercase text-muted-foreground">{label}</p>
-      <p className="font-display font-extrabold text-3xl tabular-nums">{value}</p>
-    </div>
-  );
-}
+function Queue({appts,patients,call,send,absent}:any){const waiting=appts.filter((a:Appointment)=>a.queueStatus==="Waiting for Doctor");const current=appts.find((a:Appointment)=>a.queueStatus==="Called");return <div className="grid md:grid-cols-3 gap-4 max-w-5xl mx-auto"><div className="md:col-span-2 space-y-4"><div className="bg-gradient-primary text-primary-foreground rounded-2xl p-6"><p className="text-xs uppercase opacity-80">Currently called</p><p className="font-display font-extrabold text-5xl my-1">{current?.queueNumber||"—"}</p><div className="flex gap-2 mt-4"><Button onClick={()=>waiting[0]&&call(waiting[0].id)} className="bg-card text-primary"><Phone className="w-4 h-4 mr-2"/>Call next</Button>{current&&<><Button variant="outline" className="border-primary-foreground/30 text-primary-foreground" onClick={()=>send(current.id)}>Arrived at doctor</Button><Button variant="outline" className="border-primary-foreground/30 text-primary-foreground" onClick={()=>absent(current.id)}>No show</Button></>}</div></div><div className="bg-card border border-border rounded-2xl overflow-hidden"><div className="p-4 border-b border-border"><h3 className="font-display font-bold">Ready for doctor</h3></div>{waiting.map((a:Appointment)=><div key={a.id} className="flex gap-3 p-3 border-b border-border"><span className="font-display font-bold text-primary">{a.queueNumber}</span><div className="flex-1"><p className="font-semibold text-sm">{label(patients,a.patientId)}</p><p className="text-xs text-muted-foreground">{a.visitType||"Scheduled"}</p></div><Button size="sm" variant="ghost" onClick={()=>call(a.id)}>Call</Button></div>)}</div></div><div className="space-y-3"><Info label="Active numbers" value={appts.filter((a:Appointment)=>["Waiting for Triage","Waiting for Doctor","Called","In Consultation"].includes(a.queueStatus)).length}/><Info label="Completed visits" value={appts.filter((a:Appointment)=>a.queueStatus==="Consultation Completed").length}/></div></div>;}
+function Info({label,value}:{label:string;value:number}){return <div className="bg-card border border-border rounded-2xl p-4"><p className="text-xs uppercase text-muted-foreground">{label}</p><p className="font-display font-extrabold text-3xl">{value}</p></div>;}

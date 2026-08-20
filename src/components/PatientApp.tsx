@@ -9,10 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import {
-  services, appointments, patients, notifications, helpers, medicalRecords,
-} from "@/data/mockData";
+import { services, helpers } from "@/data/mockData";
 import { LocationPickerMap, type PinnedLocation } from "@/components/LocationPickerMap";
+import { usePrototypeStore } from "@/lib/prototype-store";
 
 const iconMap = { Stethoscope, Baby, Syringe, Smile, TestTube, ShieldPlus };
 
@@ -23,7 +22,9 @@ export function PatientApp() {
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<number>(new Date().getDate() + 1);
   const [selectedLocation, setSelectedLocation] = useState<PinnedLocation | null>(null);
-  const me = patients[0];
+  const { patients, bookAppointment, registerPortalPatient, loginPatient } = usePrototypeStore();
+  const [patientId, setPatientId] = useState<string | null>(null);
+  const me = patients.find(patient => patient.id === patientId) || null;
 
   return (
     <div className="flex flex-col items-center gap-6">
@@ -37,13 +38,13 @@ export function PatientApp() {
         {/* notch */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-foreground/90 rounded-b-2xl z-20" />
         <div className="h-full overflow-y-auto pb-24 bg-background">
-          {screen === "login"   && <LoginScreen   onLogin={() => setScreen("home")} />}
-          {screen === "home"    && <HomeScreen    me={me} onBook={() => setScreen("services")} onView={() => setScreen("myAppts")} onNotif={() => setScreen("notif")} />}
+          {screen === "login"   && <LoginScreen onAuthenticated={(id) => { setPatientId(id); setScreen("home"); }} register={registerPortalPatient} login={loginPatient} />}
+          {screen === "home" && me && <HomeScreen me={me} onBook={() => setScreen("services")} onView={() => setScreen("myAppts")} onNotif={() => setScreen("notif")} />}
           {screen === "services"&& <ServicesScreen onBack={() => setScreen("home")} onPick={(id) => { setSelectedService(id); setSelectedLocation(null); setScreen("schedule"); }} />}
           {screen === "schedule"&& <ScheduleScreen serviceId={selectedService!} date={selectedDate} location={selectedLocation} onDate={setSelectedDate} onLocation={setSelectedLocation} onBack={() => setScreen("services")} onConfirm={() => setScreen("confirm")} />}
-          {screen === "confirm" && <ConfirmScreen serviceId={selectedService!} date={selectedDate} location={selectedLocation!} onDone={() => setScreen("myAppts")} />}
-          {screen === "myAppts" && <MyAppointmentsScreen onBack={() => setScreen("home")} />}
-          {screen === "records" && <MedicalRecordsScreen onBack={() => setScreen("home")} />}
+          {screen === "confirm" && me && <ConfirmScreen serviceId={selectedService!} date={selectedDate} location={selectedLocation!} onDone={() => { bookAppointment(me.id, selectedService!, new Date(new Date().getFullYear(), new Date().getMonth(), selectedDate).toISOString().slice(0, 10)); setScreen("myAppts"); }} />}
+          {screen === "myAppts" && me && <MyAppointmentsScreen patientId={me.id} onBack={() => setScreen("home")} />}
+          {screen === "records" && me && <MedicalRecordsScreen patientId={me.id} onBack={() => setScreen("home")} />}
           {screen === "notif"   && <NotifScreen onBack={() => setScreen("home")} />}
         </div>
 
@@ -57,8 +58,16 @@ export function PatientApp() {
 
 /* ---------------- screens ---------------- */
 
-function LoginScreen({ onLogin }: { onLogin: () => void }) {
+function LoginScreen({ onAuthenticated, register, login }: { onAuthenticated: (id: string) => void; register: any; login: any }) {
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [form, setForm] = useState({ fullName: "", dob: "", gender: "Female" as "Female" | "Male", mobile: "", barangay: "", municipality: "Jones", address: "", password: "" });
+  const [error, setError] = useState("");
+  const submit = () => {
+    if (mode === "login") { const patient = login(form.mobile, form.password); if (!patient) return setError("Mobile number or password is not registered on this device."); onAuthenticated(patient.id); return; }
+    if (!form.fullName || !form.dob || !form.mobile || !form.barangay || form.password.length < 4) return setError("Complete the required details and use a password with at least 4 characters.");
+    const patient = register({ fullName: form.fullName, dob: form.dob, gender: form.gender, contact: form.mobile, barangay: form.barangay, municipality: form.municipality, address: form.address || form.barangay }, form.password);
+    if (!patient) return setError("That mobile number already has an account on this device."); onAuthenticated(patient.id);
+  };
   return (
     <div className="min-h-full bg-gradient-hero p-6 pt-12 text-primary-foreground flex flex-col">
       <div className="flex-1 flex flex-col items-center justify-center text-center">
@@ -80,21 +89,17 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
           </div>
 
           <div className="space-y-3 text-left">
-            {mode === "register" && (
-              <div>
-                <Label className="text-xs">Full Name</Label>
-                <Input placeholder="Juan Dela Cruz" className="rounded-xl" />
-              </div>
-            )}
+            {mode === "register" && <><div><Label className="text-xs">Full name</Label><Input value={form.fullName} onChange={e => setForm(f => ({ ...f, fullName: e.target.value }))} placeholder="Juan Dela Cruz" className="rounded-xl" /></div><div><Label className="text-xs">Date of birth</Label><Input type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} className="rounded-xl" /></div><div><Label className="text-xs">Barangay</Label><Input value={form.barangay} onChange={e => setForm(f => ({ ...f, barangay: e.target.value }))} placeholder="Poblacion 1" className="rounded-xl" /></div><div><Label className="text-xs">Home address / purok</Label><Input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Purok, street, or landmark" className="rounded-xl" /></div></>}
             <div>
               <Label className="text-xs">Mobile Number</Label>
-              <Input placeholder="+63 9XX XXX XXXX" className="rounded-xl" />
+              <Input value={form.mobile} onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} placeholder="+63 9XX XXX XXXX" className="rounded-xl" />
             </div>
             <div>
               <Label className="text-xs">Password</Label>
-              <Input type="password" placeholder="••••••••" className="rounded-xl" />
+              <Input value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} type="password" placeholder="••••••••" className="rounded-xl" />
             </div>
-            <Button onClick={onLogin} className="w-full rounded-xl bg-gradient-primary border-0 shadow-glow h-11">
+            {error && <p className="text-xs text-destructive text-center">{error}</p>}
+            <Button onClick={submit} className="w-full rounded-xl bg-gradient-primary border-0 shadow-glow h-11">
               <LogIn className="w-4 h-4 mr-2" />
               {mode === "login" ? "Sign in" : "Create account"}
             </Button>
@@ -107,8 +112,9 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 }
 
 function HomeScreen({ me, onBook, onView, onNotif }: any) {
-  const next = appointments.find(a => a.patientId === me.id) ?? appointments[3];
-  const svc = helpers.getService(next.serviceId);
+  const { appointments } = usePrototypeStore();
+  const next = appointments.find(a => a.patientId === me.id);
+  const svc = next ? helpers.getService(next.serviceId) : null;
   return (
     <div className="bg-background">
       <div className="bg-gradient-hero p-5 pt-12 pb-20 text-primary-foreground rounded-b-[2rem]">
@@ -129,19 +135,19 @@ function HomeScreen({ me, onBook, onView, onNotif }: any) {
         <div className="bg-card rounded-2xl shadow-card p-4 border border-border animate-pop-in">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-semibold text-primary uppercase tracking-wide">Next Appointment</span>
-            <Badge className="bg-secondary-soft text-secondary border-0">Confirmed</Badge>
+            <Badge className="bg-secondary-soft text-secondary border-0">{next ? "Confirmed" : "No booking"}</Badge>
           </div>
           <div className="flex items-center gap-3">
             <div className="w-14 h-14 rounded-xl bg-primary-soft text-primary flex items-center justify-center">
               <Stethoscope className="w-6 h-6" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold truncate">{svc.name}</p>
-              <p className="text-xs text-muted-foreground">{helpers.formatDate(next.date)} · Clinic hours: 8:00 AM – 5:00 PM</p>
+              <p className="font-semibold truncate">{svc ? svc.name : "No upcoming appointment"}</p>
+              <p className="text-xs text-muted-foreground">{next ? `${helpers.formatDate(next.date)} · Clinic hours: 8:00 AM – 5:00 PM` : "Book a clinic visit to begin."}</p>
             </div>
             <div className="text-right">
               <p className="text-[10px] text-muted-foreground">Booking</p>
-              <p className="font-display font-bold text-primary">APT-2026-0098</p>
+              <p className="font-display font-bold text-primary">{next ? "Confirmed" : "—"}</p>
             </div>
           </div>
           <Button onClick={onView} variant="ghost" size="sm" className="w-full mt-3 text-primary">
@@ -339,8 +345,9 @@ function ConfirmScreen({ serviceId, date, location, onDone }: any) {
   );
 }
 
-function MyAppointmentsScreen({ onBack }: { onBack: () => void }) {
-  const list = appointments.slice(0, 5);
+function MyAppointmentsScreen({ onBack, patientId }: { onBack: () => void; patientId: string }) {
+  const { appointments } = usePrototypeStore();
+  const list = appointments.filter(a => a.patientId === patientId).slice(0, 5);
   return (
     <div>
       <ScreenHeader title="My appointments" onBack={onBack} />
@@ -376,8 +383,9 @@ function MyAppointmentsScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
-function MedicalRecordsScreen({ onBack }: { onBack: () => void }) {
-  const records = medicalRecords.filter((record) => record.patientId === patients[0].id);
+function MedicalRecordsScreen({ onBack, patientId }: { onBack: () => void; patientId: string }) {
+  const { medicalRecords } = usePrototypeStore();
+  const records = medicalRecords.filter((record) => record.patientId === patientId);
   return (
     <div>
       <ScreenHeader title="My medical records" onBack={onBack} />

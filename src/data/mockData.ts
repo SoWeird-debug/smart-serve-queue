@@ -3,7 +3,7 @@
 
 export type Role = "patient" | "staff" | "doctor" | "pharmacy" | "admin";
 
-export type QueueStatus = "Waiting" | "Waiting for Triage" | "Triage" | "Waiting for Doctor" | "Called" | "In Consultation" | "Now Serving" | "Completed" | "Consultation Completed" | "No Show" | "Scheduled";
+export type QueueStatus = "Waiting" | "Waiting for Triage" | "Triage" | "Waiting for Doctor" | "Called" | "In Consultation" | "Now Serving" | "Completed" | "Consultation Completed" | "No Show" | "Skipped" | "Cancelled" | "Scheduled";
 export type AttendanceStatus = "Pending" | "Present" | "Absent";
 
 export interface Service {
@@ -28,6 +28,20 @@ export interface Patient {
   municipality: string;
   latitude: number;
   longitude: number;
+  patientNumber?: string;
+  middleName?: string;
+  suffix?: string;
+  civilStatus?: string;
+  nationality?: string;
+  alternateContact?: string;
+  emergencyContactName?: string;
+  emergencyContactRelationship?: string;
+  emergencyContactPhone?: string;
+  addressLine?: string;
+  locationSource?: "Auto-pinned from address" | "Staff-adjusted" | "Barangay fallback";
+  locationVerified?: boolean;
+  consentToTreatment?: boolean;
+  privacyAcknowledged?: boolean;
 }
 
 export interface Appointment {
@@ -41,6 +55,8 @@ export interface Appointment {
   queueStatus: QueueStatus;
   room?: string;
   createdAt: string;
+  visitType?: "Scheduled" | "Walk-in";
+  visitReason?: string;
 }
 
 export interface DiseaseRecord {
@@ -73,6 +89,8 @@ export interface MedicineItem {
   reorderLevel: number;
   expiry: string;
   batch: string;
+  supplier?: string;
+  deliveryReference?: string;
 }
 
 export interface MedicalRecord {

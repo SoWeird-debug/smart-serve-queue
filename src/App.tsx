@@ -5,11 +5,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import { PrototypeStoreProvider } from "./lib/prototype-store";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
+    <PrototypeStoreProvider>
     <TooltipProvider>
       <Toaster />
       <Sonner />
@@ -21,6 +23,7 @@ const App = () => (
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
+    </PrototypeStoreProvider>
   </QueryClientProvider>
 );
 
