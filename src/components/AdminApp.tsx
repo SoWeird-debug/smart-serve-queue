@@ -1,18 +1,2823 @@
-import { useMemo, useState } from "react";
-import { Activity, Calendar, DatabaseZap, MapPin, Package, ShieldAlert, Users } from "lucide-react";
+import { useMemo, useState, type ChangeEvent } from "react";
+import {
+  Calendar,
+  ClipboardPlus,
+  DatabaseZap,
+  Download,
+  Eye,
+  LayoutDashboard,
+  MapPin,
+  Package,
+  Pencil,
+  Plus,
+  Settings,
+  Stethoscope,
+  Trash2,
+  TrendingUp,
+  Upload,
+  UserCog,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { usePrototypeStore } from "@/lib/prototype-store";
-import { services } from "@/data/mockData";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { DiseaseTrendMap } from "@/components/DiseaseTrendMap";
+import {
+  usePrototypeStore,
+  type ConsultationTemplate,
+  type ImportSummary,
+  type MigrationRow,
+} from "@/lib/prototype-store";
 
+type Page =
+  | "overview"
+  | "appointments"
+  | "patients"
+  | "services"
+  | "consultationTemplates"
+  | "trends"
+  | "inventory"
+  | "users";
+const nav: [Page, string, any][] = [
+  ["overview", "Overview", LayoutDashboard],
+  ["appointments", "Appointments", Calendar],
+  ["patients", "Patient Records", Users],
+  ["services", "Services & Schedules", Stethoscope],
+  ["consultationTemplates", "Consultation templates", ClipboardPlus],
+  ["trends", "Disease Trends", TrendingUp],
+  ["inventory", "Inventory", Package],
+  ["users", "Staff & Roles", UserCog],
+];
 export function AdminApp() {
-  const { patients, appointments, medicines, medicalRecords, triage, audit, reset } = usePrototypeStore();
-  const [cleared, setCleared] = useState(false);
-  const active = appointments.filter(a => ["Waiting for Triage", "Waiting for Doctor", "Called", "In Consultation"].includes(a.queueStatus));
-  const walkIns = appointments.filter(a => a.visitType === "Walk-in");
-  const byBarangay = useMemo(() => patients.reduce<Record<string, number>>((result, patient) => ({ ...result, [patient.barangay]: (result[patient.barangay] || 0) + 1 }), {}), [patients]);
-  return <div className="space-y-6"><div className="flex flex-wrap justify-between gap-4"><div><Badge variant="secondary" className="bg-primary-soft text-primary border-0">Local administration console</Badge><h2 className="font-display font-bold text-2xl mt-2">Live prototype operations</h2><p className="text-sm text-muted-foreground">All figures below are calculated from the same local data used by each role.</p></div><Button variant="outline" onClick={() => { reset(); setCleared(true); }}><DatabaseZap className="w-4 h-4 mr-2"/>Clear local patient data</Button></div>{cleared && <p className="text-sm text-secondary">Patient, visit, triage, consultation, account, and audit data were cleared. The medicine catalogue remains for clinic setup.</p>}<div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4"><Stat icon={Users} label="Registered patients" value={patients.length}/><Stat icon={Calendar} label="Visits today" value={appointments.length}/><Stat icon={Activity} label="Active queue" value={active.length}/><Stat icon={Package} label="Low-stock medicines" value={medicines.filter(m=>m.stock<=m.reorderLevel).length}/></div><div className="grid lg:grid-cols-2 gap-5"><section className="bg-card border border-border rounded-2xl p-5 shadow-soft"><h3 className="font-display font-bold">Live visit flow</h3><div className="mt-4 space-y-3">{appointments.length ? appointments.map(a => <div key={a.id} className="flex justify-between gap-3 border-b border-border pb-3"><div><p className="font-semibold text-sm">{patients.find(p=>p.id===a.patientId)?.fullName || "Unknown patient"}</p><p className="text-xs text-muted-foreground">{services.find(s=>s.id===a.serviceId)?.name} · {a.visitType || "Scheduled"}</p></div><div className="text-right"><p className="font-display font-bold text-primary">{a.queueNumber || "—"}</p><Badge className="bg-muted text-muted-foreground border-0">{a.queueStatus}</Badge></div></div>) : <Empty text="No visits recorded yet. Start with a patient registration or online booking."/>}</div></section><section className="bg-card border border-border rounded-2xl p-5 shadow-soft"><h3 className="font-display font-bold">Walk-ins & queue safeguards</h3><div className="grid grid-cols-2 gap-3 mt-4"><Tile label="Walk-in visits" value={walkIns.length}/><Tile label="Completed consultations" value={medicalRecords.length}/><Tile label="Triage records" value={triage.length}/><Tile label="Audit events" value={audit.length}/></div><div className="mt-5 bg-muted/50 rounded-xl p-4 text-xs text-muted-foreground"><ShieldAlert className="w-4 h-4 text-warning inline mr-1"/>Emergency triage is routed immediately to the doctor workspace, bypassing the ordinary waiting queue.</div></section><section className="bg-card border border-border rounded-2xl p-5 shadow-soft"><h3 className="font-display font-bold">Location coverage</h3><p className="text-xs text-muted-foreground mt-1">Patient residence counts only. Do not expose individual pins in public reporting.</p><div className="mt-4 space-y-2">{Object.entries(byBarangay).map(([barangay,count])=><div key={barangay} className="flex justify-between rounded-xl bg-muted/50 p-3"><span className="flex gap-2 text-sm"><MapPin className="w-4 h-4 text-primary"/>{barangay}</span><b>{count}</b></div>)}{!Object.keys(byBarangay).length&&<Empty text="No registered residence areas yet."/>}</div></section><section className="bg-card border border-border rounded-2xl p-5 shadow-soft"><h3 className="font-display font-bold">Recent audit activity</h3><div className="mt-4 space-y-3">{audit.slice(0,8).map(event=><div key={event.id} className="border-b border-border pb-2"><p className="text-sm font-medium">{event.action}</p><p className="text-xs text-muted-foreground">{event.role} · {new Date(event.at).toLocaleString("en-PH")}</p></div>)}{!audit.length&&<Empty text="No local activity recorded yet."/>}</div></section></div></div>;
+  const [page, setPage] = useState<Page>("overview");
+  const store = usePrototypeStore();
+  return (
+    <div className="overflow-hidden rounded-[2rem] border border-border bg-card shadow-card">
+      <div className="grid min-h-[780px] md:grid-cols-[270px,1fr]">
+        <aside className="bg-gradient-to-b from-primary via-primary to-primary/90 p-5 text-primary-foreground">
+          <div className="mb-8 flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-card/15">
+              <Settings className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-display font-bold">SmartServe</p>
+              <p className="text-[10px] opacity-70">
+                Clinic operations console
+              </p>
+            </div>
+          </div>
+          <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[.16em] opacity-60">
+            Workspace
+          </p>
+          <nav className="space-y-1">
+            {nav.map(([id, label, Icon]) => (
+              <button
+                key={id}
+                onClick={() => setPage(id)}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm ${page === id ? "bg-card text-primary shadow-card" : "text-primary-foreground/75 hover:bg-card/10"}`}
+              >
+                <Icon className="w-4 h-4" />
+                {label}
+              </button>
+            ))}
+          </nav>
+          <SidebarCalendar />
+        </aside>
+        <main className="bg-muted/20 p-5 md:p-8">
+          <PageContent page={page} store={store} />
+        </main>
+      </div>
+    </div>
+  );
 }
-function Stat({icon:Icon,label,value}:{icon:any;label:string;value:number}){return <div className="bg-card border border-border rounded-2xl p-4 shadow-soft"><Icon className="w-5 h-5 text-primary mb-3"/><p className="font-display font-extrabold text-3xl">{value}</p><p className="text-xs text-muted-foreground">{label}</p></div>;}
-function Tile({label,value}:{label:string;value:number}){return <div className="bg-muted/50 rounded-xl p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="font-display font-bold text-2xl">{value}</p></div>;}
-function Empty({text}:{text:string}){return <p className="py-6 text-center text-sm text-muted-foreground">{text}</p>;}
+
+function SidebarCalendar() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = Array.from({ length: firstDay + daysInMonth }, (_, index) =>
+    index < firstDay ? null : index - firstDay + 1,
+  );
+  return (
+    <section
+      className="mt-6 rounded-2xl border border-primary-foreground/15 bg-card/10 p-3 backdrop-blur-sm"
+      aria-label="Current month calendar"
+    >
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold">
+            {today.toLocaleDateString("en-PH", {
+              month: "long",
+              year: "numeric",
+            })}
+          </p>
+          <p className="text-[10px] text-primary-foreground/65">
+            Today ·{" "}
+            {today.toLocaleDateString("en-PH", {
+              weekday: "long",
+              month: "short",
+              day: "numeric",
+            })}
+          </p>
+        </div>
+        <Calendar className="h-4 w-4 text-primary-foreground/70" />
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium text-primary-foreground/55">
+        {"SMTWTFS".split("").map((day, index) => (
+          <span key={`${day}-${index}`}>{day}</span>
+        ))}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {cells.map((day, index) =>
+          day === null ? (
+            <span key={`empty-${index}`} className="h-7" />
+          ) : (
+            <time
+              key={day}
+              dateTime={new Date(year, month, day).toISOString().slice(0, 10)}
+              className={`grid h-7 place-items-center rounded-lg text-xs font-medium ${day === today.getDate() ? "bg-card text-primary shadow-soft" : "text-primary-foreground/80"}`}
+            >
+              {day}
+            </time>
+          ),
+        )}
+      </div>
+    </section>
+  );
+}
+function PageContent({ page, store }: any) {
+  const {
+    patients,
+    appointments,
+    medicines,
+    services,
+    consultationTemplates,
+    staffUsers,
+    medicalRecords,
+    audit,
+  } = store;
+  if (page === "overview") return <OverviewDashboard store={store} />;
+  if (page === "patients")
+    return (
+      <PatientPage
+        patients={patients}
+        medicalRecords={medicalRecords}
+        update={store.updatePatient}
+        remove={store.deletePatient}
+        barangayEntries={store.barangays}
+        addBarangay={store.addBarangay}
+        updateBarangay={store.updateBarangay}
+        deleteBarangay={store.deleteBarangay}
+      />
+    );
+  if (page === "appointments")
+    return (
+      <AppointmentPage
+        appointments={appointments}
+        patients={patients}
+        update={store.updateAppointment}
+        remove={store.deleteAppointment}
+      />
+    );
+  if (page === "services")
+    return (
+      <ServicePage
+        services={services}
+        add={store.addService}
+        update={store.updateService}
+        remove={store.deleteService}
+      />
+    );
+  if (page === "consultationTemplates")
+    return (
+      <ConsultationTemplatePage
+        templates={consultationTemplates}
+        add={store.addConsultationTemplate}
+        update={store.updateConsultationTemplate}
+        remove={store.deleteConsultationTemplate}
+      />
+    );
+  if (page === "users")
+    return (
+      <StaffPage
+        users={staffUsers}
+        add={store.addStaffUser}
+        update={store.updateStaffUser}
+        remove={store.deleteStaffUser}
+      />
+    );
+  if (page === "inventory")
+    return (
+      <MedicinePage
+        medicines={medicines}
+        add={store.addMedicine}
+        update={store.updateMedicine}
+        remove={store.deleteMedicine}
+      />
+    );
+  const records = medicalRecords.flatMap((r: any) => {
+    const p = patients.find((x: any) => x.id === r.patientId);
+    return p && p.locationSource !== "Barangay fallback" && p.locationVerified
+      ? [
+          {
+            id: r.id,
+            category: "Consultation diagnosis",
+            diagnosis: r.diagnosis,
+            date: r.date,
+            count: 1,
+            barangay: p.barangay,
+            municipality: p.municipality,
+            latitude: p.latitude,
+            longitude: p.longitude,
+          },
+        ]
+      : [];
+  });
+  const barangayOnlyCases = medicalRecords.length - records.length;
+  return (
+    <>
+      <Head
+        title="Disease trends"
+        sub="Completed consultation diagnoses mapped only from verified or specifically selected residence locations."
+      />
+      {records.length ? (
+        <DiseaseTrendMap records={records} />
+      ) : (
+        <Empty text="No completed consultation diagnosis with a verified map location has been recorded yet." />
+      )}
+      {barangayOnlyCases > 0 ? (
+        <p className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          {barangayOnlyCases} case{barangayOnlyCases === 1 ? "" : "s"} is
+          recorded by barangay only or has an unverified pin, so it is
+          intentionally excluded from the precise location map.
+        </p>
+      ) : null}
+    </>
+  );
+}
+function OverviewDashboard({ store }: any) {
+  const {
+    patients,
+    appointments,
+    medicines,
+    services,
+    staffUsers,
+    medicalRecords,
+    audit,
+    reset,
+  } = store;
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [serviceId, setServiceId] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [importOpen, setImportOpen] = useState(false);
+  const filteredAppointments = useMemo(
+    () =>
+      appointments.filter((appointment: any) => {
+        const inDateRange =
+          (!from || appointment.date >= from) &&
+          (!to || appointment.date <= to);
+        const inService =
+          serviceId === "all" || appointment.serviceId === serviceId;
+        const inStatus = status === "all" || appointment.queueStatus === status;
+        return inDateRange && inService && inStatus;
+      }),
+    [appointments, from, to, serviceId, status],
+  );
+  const filteredRecords = useMemo(
+    () =>
+      medicalRecords.filter(
+        (record: any) =>
+          (!from || record.date >= from) && (!to || record.date <= to),
+      ),
+    [medicalRecords, from, to],
+  );
+  const trendData = useMemo(() => {
+    const recordedDates = [
+      ...new Set([
+        ...filteredAppointments.map((appointment: any) => appointment.date),
+        ...filteredRecords.map((record: any) => record.date),
+      ]),
+    ]
+      .filter(Boolean)
+      .sort();
+    const dates = recordedDates.length
+      ? recordedDates
+      : emptyTrendDates(from, to);
+    return dates.map((date) => ({
+      date: formatChartDate(date),
+      appointments: filteredAppointments.filter(
+        (appointment: any) => appointment.date === date,
+      ).length,
+      cases: filteredRecords.filter((record: any) => record.date === date)
+        .length,
+    }));
+  }, [filteredAppointments, filteredRecords, from, to]);
+  const statusData = useMemo(() => {
+    const results = Object.entries(
+      filteredAppointments.reduce(
+        (counts: Record<string, number>, appointment: any) => {
+          const label = appointment.queueStatus || "Scheduled";
+          counts[label] = (counts[label] || 0) + 1;
+          return counts;
+        },
+        {},
+      ),
+    )
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+    return results.length
+      ? results
+      : [
+          { name: "Waiting", value: 0 },
+          { name: "In consultation", value: 0 },
+          { name: "Completed", value: 0 },
+          { name: "Cancelled", value: 0 },
+        ];
+  }, [filteredAppointments]);
+  const diagnosisData = useMemo(() => {
+    const results = Object.entries(
+      filteredRecords.reduce((counts: Record<string, number>, record: any) => {
+        const label = record.diagnosis?.trim() || "No diagnosis recorded";
+        counts[label] = (counts[label] || 0) + 1;
+        return counts;
+      }, {}),
+    )
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+    return results.length ? results : [{ name: "No cases recorded", value: 0 }];
+  }, [filteredRecords]);
+  const present = filteredAppointments.filter(
+    (appointment: any) => appointment.attendanceStatus === "Present",
+  ).length;
+  const waiting = filteredAppointments.filter((appointment: any) =>
+    [
+      "Waiting",
+      "Waiting for Triage",
+      "Triage",
+      "Waiting for Doctor",
+      "Called",
+      "In Consultation",
+      "Now Serving",
+    ].includes(appointment.queueStatus),
+  ).length;
+  const lowStock = medicines.filter(
+    (medicine: any) => medicine.stock <= medicine.reorderLevel,
+  ).length;
+  const availableStaff = staffUsers.filter(
+    (user: any) =>
+      user.active && (user.availability || "Available") === "Available",
+  ).length;
+  const statuses = [
+    ...new Set(
+      appointments
+        .map((appointment: any) => appointment.queueStatus)
+        .filter(Boolean),
+    ),
+  ].sort();
+  const clearFilters = () => {
+    setFrom("");
+    setTo("");
+    setServiceId("all");
+    setStatus("all");
+  };
+  const exportFilteredData = () => {
+    const rows = [
+      [
+        "Record type",
+        "Date",
+        "Patient ID",
+        "Service",
+        "Visit type",
+        "Queue status",
+        "Attendance",
+        "Diagnosis",
+        "Clinician",
+      ],
+      ...filteredAppointments.map((appointment: any) => {
+        const patient = patients.find(
+          (item: any) => item.id === appointment.patientId,
+        );
+        const service = services.find(
+          (item: any) => item.id === appointment.serviceId,
+        );
+        return [
+          "Appointment",
+          appointment.date,
+          patient?.patientNumber || appointment.patientId,
+          service?.name || "Unknown service",
+          appointment.visitType || "Scheduled",
+          appointment.queueStatus,
+          appointment.attendanceStatus,
+          "",
+          "",
+        ];
+      }),
+      ...filteredRecords.map((record: any) => {
+        const patient = patients.find(
+          (item: any) => item.id === record.patientId,
+        );
+        return [
+          "Completed checkup",
+          record.date,
+          patient?.patientNumber || record.patientId,
+          "",
+          "",
+          "",
+          "",
+          record.diagnosis,
+          record.clinician,
+        ];
+      }),
+    ];
+    const csv = rows
+      .map((row) =>
+        row
+          .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
+          .join(","),
+      )
+      .join("\n");
+    const file = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `smartserve-overview-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <>
+      <Head
+        title="Live operations overview"
+        sub="Filter local operational data, monitor clinic workload, and export the current view."
+        action={
+          <div className="flex gap-2">
+            <Button
+              size="icon"
+              variant="outline"
+              title="Import CSV data"
+              aria-label="Import CSV data"
+              onClick={() => setImportOpen(true)}
+            >
+              <Upload className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" onClick={reset}>
+              <DatabaseZap className="mr-2 h-4 w-4" />
+              Clear patient data
+            </Button>
+            <Button onClick={exportFilteredData}>
+              <Download className="mr-2 h-4 w-4" />
+              Export data
+            </Button>
+          </div>
+        }
+      />
+      <section className="mb-5 rounded-2xl border border-border bg-card p-5 shadow-soft">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-display font-bold">Dashboard filters</h3>
+            <p className="text-xs text-muted-foreground">
+              Appointment filters apply to date, service, and status. Checkup
+              cases use the selected date range.
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <DateFilter label="From date" value={from} onChange={setFrom} />
+          <DateFilter label="To date" value={to} onChange={setTo} />
+          <SelectFilter
+            label="Service"
+            value={serviceId}
+            onChange={setServiceId}
+            options={[
+              { value: "all", label: "All services" },
+              ...services.map((service: any) => ({
+                value: service.id,
+                label: service.name,
+              })),
+            ]}
+          />
+          <SelectFilter
+            label="Appointment status"
+            value={status}
+            onChange={setStatus}
+            options={[
+              { value: "all", label: "All statuses" },
+              ...statuses.map((item: string) => ({ value: item, label: item })),
+            ]}
+          />
+        </div>
+      </section>
+      <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <Kpi
+          label="Filtered appointments"
+          value={filteredAppointments.length}
+        />
+        <Kpi label="Present check-ins" value={present} />
+        <Kpi label="Completed checkups" value={filteredRecords.length} />
+        <Kpi label="Currently in queue" value={waiting} />
+        <Kpi label="Low-stock medicines" value={lowStock} />
+        <Kpi label="Available staff" value={availableStaff} />
+      </div>
+      <div className="mb-5 grid gap-5 xl:grid-cols-[1.55fr,1fr]">
+        <DashboardCard
+          title="Appointments and completed cases"
+          sub="Daily volume within the selected date range."
+        >
+          <div className="mb-3 flex flex-wrap gap-4 text-xs font-medium">
+            <span className="flex items-center gap-2">
+              <i className="h-2 w-2 rounded-full bg-primary" />
+              Appointments
+            </span>
+            <span className="flex items-center gap-2">
+              <i className="h-2 w-2 rounded-full bg-accent" />
+              Completed cases
+            </span>
+          </div>
+          <ResponsiveContainer width="100%" height={250}>
+            <AreaChart
+              data={trendData}
+              margin={{ left: -18, right: 12, top: 8, bottom: 0 }}
+            >
+              <defs>
+                <linearGradient
+                  id="appointmentFill"
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="1"
+                >
+                  <stop
+                    offset="5%"
+                    stopColor="hsl(var(--primary))"
+                    stopOpacity={0.35}
+                  />
+                  <stop
+                    offset="95%"
+                    stopColor="hsl(var(--primary))"
+                    stopOpacity={0}
+                  />
+                </linearGradient>
+                <linearGradient id="caseFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop
+                    offset="5%"
+                    stopColor="hsl(var(--accent))"
+                    stopOpacity={0.3}
+                  />
+                  <stop
+                    offset="95%"
+                    stopColor="hsl(var(--accent))"
+                    stopOpacity={0}
+                  />
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} strokeDasharray="3 3" />
+              <XAxis dataKey="date" tickLine={false} axisLine={false} />
+              <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+              <Tooltip
+                cursor={{
+                  stroke: "hsl(var(--border))",
+                  strokeDasharray: "4 4",
+                }}
+                contentStyle={{
+                  borderRadius: 12,
+                  borderColor: "hsl(var(--border))",
+                }}
+              />
+              <Area
+                type="monotone"
+                dataKey="appointments"
+                name="Appointments"
+                stroke="hsl(var(--primary))"
+                fill="url(#appointmentFill)"
+                strokeWidth={3}
+                activeDot={{ r: 5 }}
+              />
+              <Area
+                type="monotone"
+                dataKey="cases"
+                name="Completed cases"
+                stroke="hsl(var(--accent))"
+                fill="url(#caseFill)"
+                strokeWidth={3}
+                activeDot={{ r: 5 }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+          {!filteredAppointments.length && !filteredRecords.length && (
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              No matching records yet — the chart is ready for the first clinic
+              activity.
+            </p>
+          )}
+        </DashboardCard>
+        <DashboardCard
+          title="Appointment status"
+          sub="Current workflow state of matching appointments."
+        >
+          <ResponsiveContainer width="100%" height={270}>
+            <BarChart
+              data={statusData}
+              layout="vertical"
+              margin={{ left: 8, right: 12, top: 8, bottom: 0 }}
+            >
+              <defs>
+                <linearGradient id="statusFill" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="hsl(var(--primary))" />
+                  <stop offset="100%" stopColor="hsl(var(--accent))" />
+                </linearGradient>
+              </defs>
+              <CartesianGrid horizontal={false} strokeDasharray="3 3" />
+              <XAxis
+                type="number"
+                allowDecimals={false}
+                tickLine={false}
+                axisLine={false}
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={104}
+                tickLine={false}
+                axisLine={false}
+              />
+              <Tooltip
+                cursor={{ fill: "hsl(var(--muted))" }}
+                contentStyle={{
+                  borderRadius: 12,
+                  borderColor: "hsl(var(--border))",
+                }}
+              />
+              <Bar
+                dataKey="value"
+                name="Appointments"
+                fill="url(#statusFill)"
+                radius={[0, 6, 6, 0]}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </DashboardCard>
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[1.1fr,.9fr]">
+        <DashboardCard
+          title="Cases by diagnosis"
+          sub="Top recorded diagnoses from completed checkups."
+        >
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart
+              data={diagnosisData}
+              margin={{ left: -18, right: 12, top: 8, bottom: 48 }}
+            >
+              <defs>
+                <linearGradient id="caseBarFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="hsl(var(--accent))" />
+                  <stop offset="100%" stopColor="hsl(var(--primary))" />
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} strokeDasharray="3 3" />
+              <XAxis
+                dataKey="name"
+                tickLine={false}
+                axisLine={false}
+                interval={0}
+                angle={-20}
+                textAnchor="end"
+                height={60}
+              />
+              <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+              <Tooltip
+                cursor={{ fill: "hsl(var(--muted))" }}
+                contentStyle={{
+                  borderRadius: 12,
+                  borderColor: "hsl(var(--border))",
+                }}
+              />
+              <Bar
+                dataKey="value"
+                name="Cases"
+                fill="url(#caseBarFill)"
+                radius={[6, 6, 0, 0]}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </DashboardCard>
+        <DashboardCard
+          title="Operational attention"
+          sub="Items that may need action today."
+        >
+          <div className="space-y-3">
+            <Attention
+              label="Medicines at or below reorder level"
+              value={lowStock}
+              tone={lowStock ? "text-destructive" : "text-primary"}
+            />
+            <Attention
+              label="Appointments waiting to be completed"
+              value={waiting}
+              tone={waiting ? "text-amber-600" : "text-primary"}
+            />
+            <Attention
+              label="Staff currently available"
+              value={availableStaff}
+              tone="text-primary"
+            />
+            <Attention
+              label="Recent activity entries"
+              value={audit.length}
+              tone="text-primary"
+            />
+          </div>
+        </DashboardCard>
+      </div>
+      <ImportMigrationDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImport={store.importMigration}
+      />
+    </>
+  );
+}
+function ImportMigrationDialog({
+  open,
+  onOpenChange,
+  onImport,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onImport: (rows: MigrationRow[]) => ImportSummary;
+}) {
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState<MigrationRow[]>([]);
+  const [error, setError] = useState("");
+  const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const chooseFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError("");
+    setSummary(null);
+    try {
+      const parsed = parseCsvRows(await file.text());
+      if (!parsed.length)
+        throw new Error("The selected file has no data rows.");
+      setFileName(file.name);
+      setRows(parsed);
+    } catch (reason) {
+      setRows([]);
+      setFileName("");
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to read this CSV file.",
+      );
+    }
+  };
+  const completeImport = () => {
+    const result = onImport(rows);
+    setSummary(result);
+    if (
+      !result.patientsAdded &&
+      !result.appointmentsAdded &&
+      !result.checkupsAdded
+    )
+      setError(
+        "No compatible new records were found. Check the required columns and whether these records already exist.",
+      );
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto rounded-2xl p-0">
+        <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
+          <DialogTitle className="flex items-center gap-2 font-display text-2xl">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-soft">
+              <Upload className="h-5 w-5 text-primary" />
+            </span>
+            Import migration data
+          </DialogTitle>
+          <DialogDescription>
+            Upload a CSV export to add compatible historical records to this
+            local prototype. Existing records are kept; duplicates are skipped.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5 px-6 py-5">
+          <div className="rounded-xl border border-dashed border-primary/40 bg-primary-soft/30 p-4">
+            <Label htmlFor="migration-file" className="font-semibold">
+              CSV file
+            </Label>
+            <Input
+              id="migration-file"
+              type="file"
+              accept=".csv,text/csv"
+              onChange={chooseFile}
+              className="mt-2 cursor-pointer bg-card"
+            />
+            <p className="mt-2 text-xs text-muted-foreground">
+              Supported: SmartServe operational CSV exports, or patient master
+              CSVs with Full name, Date of birth, Mobile number, Barangay,
+              Municipality, and Address.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-border p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                Patient master file
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Adds patient profiles. Optional columns: Patient ID, Gender,
+                Latitude, and Longitude.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                Operational export
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Imports Appointments and Completed checkups when their Patient
+                ID already exists locally.
+              </p>
+            </div>
+          </div>
+          {rows.length > 0 && (
+            <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">{fileName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {rows.length} data row{rows.length === 1 ? "" : "s"} ready
+                    for review and migration.
+                  </p>
+                </div>
+                <Badge className="border-0 bg-primary-soft text-primary">
+                  CSV ready
+                </Badge>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Detected columns: {Object.keys(rows[0]).slice(0, 7).join(" · ")}
+                {Object.keys(rows[0]).length > 7 ? " · …" : ""}
+              </p>
+            </div>
+          )}
+          {summary && (
+            <div className="rounded-xl border border-secondary/30 bg-secondary-soft/50 p-4">
+              <p className="font-semibold text-secondary">Migration complete</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Added {summary.patientsAdded} patient profile(s),{" "}
+                {summary.appointmentsAdded} appointment(s), and{" "}
+                {summary.checkupsAdded} checkup(s). Skipped {summary.skipped}{" "}
+                duplicate or incomplete row(s).
+              </p>
+            </div>
+          )}
+          {error && (
+            <p className="rounded-xl bg-destructive/10 p-3 text-sm text-destructive">
+              {error}
+            </p>
+          )}
+        </div>
+        <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <Button disabled={!rows.length} onClick={completeImport}>
+            <Upload className="mr-2 h-4 w-4" />
+            Import compatible rows
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+function parseCsvRows(source: string): MigrationRow[] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '"') {
+      if (quoted && source[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else quoted = !quoted;
+    } else if (character === "," && !quoted) {
+      row.push(value);
+      value = "";
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && source[index + 1] === "\n") index += 1;
+      row.push(value);
+      if (row.some((cell) => cell.trim())) rows.push(row);
+      row = [];
+      value = "";
+    } else value += character;
+  }
+  row.push(value);
+  if (row.some((cell) => cell.trim())) rows.push(row);
+  if (rows.length < 2) return [];
+  const headers = rows
+    .shift()!
+    .map(
+      (header, index) =>
+        header.replace(/^\uFEFF/, "").trim() || `Column ${index + 1}`,
+    );
+  return rows.map((values) =>
+    Object.fromEntries(
+      headers.map((header, index) => [header, values[index]?.trim() || ""]),
+    ),
+  );
+}
+function DateFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <Input
+        type="date"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1"
+      />
+    </div>
+  );
+}
+function SelectFilter({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+function DashboardCard({
+  title,
+  sub,
+  children,
+}: {
+  title: string;
+  sub: string;
+  children: any;
+}) {
+  return (
+    <section className="rounded-2xl border border-border bg-card p-5 shadow-soft">
+      <div className="mb-4">
+        <h3 className="font-display font-bold">{title}</h3>
+        <p className="text-xs text-muted-foreground">{sub}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+function ChartEmpty({ text }: { text: string }) {
+  return (
+    <div className="grid h-[270px] place-items-center rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center text-sm text-muted-foreground">
+      {text}
+    </div>
+  );
+}
+function Attention({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: string;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-3">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className={`font-display text-2xl font-bold ${tone}`}>{value}</p>
+    </div>
+  );
+}
+function formatChartDate(date: string) {
+  return new Intl.DateTimeFormat("en-PH", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(`${date}T00:00:00`));
+}
+function emptyTrendDates(from: string, to: string) {
+  const end = to ? new Date(`${to}T12:00:00`) : new Date();
+  const start = from ? new Date(`${from}T12:00:00`) : new Date(end);
+  if (!from) start.setDate(end.getDate() - 6);
+  if (start > end) start.setTime(end.getTime());
+  const dates: string[] = [];
+  const cursor = new Date(start);
+  while (cursor <= end && dates.length < 90) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+const normalizeBarangayName = (value?: string) =>
+  value
+    ?.trim()
+    .toLocaleLowerCase("en-PH")
+    .replace(/[^a-z0-9]/g, "") || "";
+
+function PatientPage({
+  patients,
+  medicalRecords,
+  update,
+  remove,
+  barangayEntries,
+  addBarangay,
+  updateBarangay,
+  deleteBarangay,
+}: any) {
+  const [selected, setSelected] = useState<any>(null);
+  const [editing, setEditing] = useState(false);
+  const [barangayQuery, setBarangayQuery] = useState("");
+  const [selectedBarangay, setSelectedBarangay] = useState("");
+  const [patientQuery, setPatientQuery] = useState("");
+  const [barangayEditorOpen, setBarangayEditorOpen] = useState(false);
+  const [editingBarangay, setEditingBarangay] = useState<any>(null);
+  const [deletingBarangay, setDeletingBarangay] = useState<any>(null);
+  const [barangayError, setBarangayError] = useState("");
+  const [directoryNotice, setDirectoryNotice] = useState("");
+  const [barangayForm, setBarangayForm] = useState({
+    name: "",
+    municipality: "",
+    province: "",
+    postalCode: "",
+  });
+  const barangays = useMemo(() => {
+    const directory = new Map<string, any>();
+    (barangayEntries || []).forEach((entry: any) => {
+      const key = normalizeBarangayName(entry.name);
+      if (!key) return;
+      directory.set(key, { ...entry, key, count: 0 });
+    });
+    patients.forEach((patient: any) => {
+      const name = patient.barangay?.trim() || "Unspecified barangay";
+      const key = normalizeBarangayName(name);
+      const existing = directory.get(key);
+      directory.set(key, {
+        ...existing,
+        key,
+        name: existing?.name || name,
+        municipality: existing?.municipality || patient.municipality || "",
+        province: existing?.province || patient.province || "",
+        postalCode: existing?.postalCode || patient.postalCode || "",
+        count: (existing?.count || 0) + 1,
+      });
+    });
+    return [...directory.values()]
+      .sort((left, right) => left.name.localeCompare(right.name, "en-PH"));
+  }, [barangayEntries, patients]);
+  const visibleBarangays = barangays.filter((barangay) =>
+    barangay.name
+      .toLocaleLowerCase("en-PH")
+      .includes(barangayQuery.trim().toLocaleLowerCase("en-PH")),
+  );
+  const visiblePatients = patients
+    .filter(
+      (patient: any) =>
+        (!selectedBarangay ||
+          normalizeBarangayName(patient.barangay) ===
+            normalizeBarangayName(selectedBarangay)) &&
+        [patient.fullName, patient.patientNumber, patient.contact]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase("en-PH")
+          .includes(patientQuery.trim().toLocaleLowerCase("en-PH")),
+    )
+    .sort((left: any, right: any) =>
+      left.fullName.localeCompare(right.fullName, "en-PH"),
+    );
+  const openPatient = (patient: any) => {
+    setSelected({ ...patient });
+    setEditing(false);
+  };
+  const openBarangayEditor = (barangay?: any) => {
+    setEditingBarangay(barangay || null);
+    setBarangayForm({
+      name: barangay?.name || "",
+      municipality: barangay?.municipality || "",
+      province: barangay?.province || "",
+      postalCode: barangay?.postalCode || "",
+    });
+    setBarangayError("");
+    setBarangayEditorOpen(true);
+  };
+  const saveBarangay = () => {
+    if (
+      !barangayForm.name.trim() ||
+      !barangayForm.municipality.trim() ||
+      !barangayForm.province.trim()
+    ) {
+      setBarangayError(
+        "Barangay, municipality / city, and province are required.",
+      );
+      return;
+    }
+    const saved = editingBarangay
+      ? updateBarangay(editingBarangay.name, barangayForm)
+      : addBarangay(barangayForm);
+    if (!saved) {
+      setBarangayError(
+        "A managed barangay with this name already exists. Use Edit instead.",
+      );
+      return;
+    }
+    setBarangayEditorOpen(false);
+    setEditingBarangay(null);
+    setBarangayError("");
+    setDirectoryNotice("");
+  };
+  const confirmBarangayDelete = () => {
+    if (!deletingBarangay) return;
+    const removed = deleteBarangay(deletingBarangay.name);
+    setDeletingBarangay(null);
+    setDirectoryNotice(
+      removed
+        ? ""
+        : "This barangay cannot be deleted while patient records are assigned to it. Reassign or update those patient records first.",
+    );
+  };
+  const updateNamePart = (key: string, value: string) => {
+    const next = { ...selected, [key]: value };
+    const composedName = [
+      next.givenName,
+      next.middleName,
+      next.familyName,
+      next.suffix,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    setSelected({
+      ...next,
+      fullName:
+        next.givenName?.trim() && next.familyName?.trim()
+          ? composedName
+          : next.fullName,
+    });
+  };
+  const save = () => {
+    update(selected.id, selected);
+    setEditing(false);
+  };
+  const checkups = selected
+    ? medicalRecords
+        .filter((record: any) => record.patientId === selected.id)
+        .sort((a: any, b: any) => b.date.localeCompare(a.date))
+    : [];
+  return (
+    <>
+      <Head
+        title="Patient records"
+        sub="Choose a barangay to find and open a private patient record."
+      />
+      {!selectedBarangay ? (
+        <Panel
+          title={`Barangay directory (${barangays.length})`}
+          action={
+            <Button
+              type="button"
+              size="icon"
+              title="Add barangay"
+              aria-label="Add barangay"
+              onClick={() => openBarangayEditor()}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          }
+        >
+          <div className="mb-4 max-w-md">
+            <Label htmlFor="barangay-search">Search barangay</Label>
+            <Input
+              id="barangay-search"
+              value={barangayQuery}
+              onChange={(event) => setBarangayQuery(event.target.value)}
+              placeholder="Type a barangay name"
+              className="mt-1"
+            />
+          </div>
+          {directoryNotice ? (
+            <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {directoryNotice}
+            </p>
+          ) : null}
+          {visibleBarangays.length ? (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleBarangays.map((barangay) => (
+                <div
+                  key={barangay.name}
+                  className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 p-2 transition-smooth hover:border-primary/40 hover:bg-primary-soft/40"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBarangay(barangay.name);
+                      setPatientQuery("");
+                    }}
+                    className="min-w-0 flex-1 px-1 py-1 text-left"
+                  >
+                    <span className="block truncate font-medium">
+                      {barangay.name}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {barangay.municipality || "Municipality not set"}
+                    </span>
+                  </button>
+                  <Badge className="border-0 bg-card text-primary">
+                    {barangay.count}
+                  </Badge>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      title={`Edit ${barangay.name}`}
+                      aria-label={`Edit ${barangay.name}`}
+                      onClick={() => openBarangayEditor(barangay)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      title={
+                        barangay.count
+                          ? "Reassign patient records before deleting this barangay"
+                          : `Delete ${barangay.name}`
+                      }
+                      aria-label={`Delete ${barangay.name}`}
+                      disabled={barangay.count > 0}
+                      onClick={() => setDeletingBarangay(barangay)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty text="No barangay matches your search." />
+          )}
+        </Panel>
+      ) : (
+        <Panel
+          title={`Patients in ${selectedBarangay} (${visiblePatients.length})`}
+          action={
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              aria-label="Close patient list and return to barangay directory"
+              title="Return to barangay directory"
+              onClick={() => {
+                setSelectedBarangay("");
+                setBarangayQuery("");
+                setPatientQuery("");
+              }}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          }
+        >
+          <div className="mb-4 max-w-md">
+            <Label htmlFor="patient-search">Search patient</Label>
+            <Input
+              id="patient-search"
+              value={patientQuery}
+              onChange={(event) => setPatientQuery(event.target.value)}
+              placeholder="Name, patient ID, or mobile number"
+              className="mt-1"
+            />
+          </div>
+          {visiblePatients.map((p: any) => (
+            <Row
+              key={p.id}
+              title={p.fullName}
+              detail={`${p.patientNumber || "Patient ID pending"} · ${p.contact} · ${p.barangay}`}
+              badge="Patient"
+              onClick={() => openPatient(p)}
+              actions={
+                <Button
+                  size="icon"
+                  variant="outline"
+                  aria-label={`View ${p.fullName}`}
+                  onClick={() => openPatient(p)}
+                >
+                  <Eye className="w-4 h-4" />
+                </Button>
+              }
+            />
+          ))}
+          {!visiblePatients.length && (
+            <Empty text="No patient in this barangay matches the search." />
+          )}
+        </Panel>
+      )}
+      <Dialog
+        open={barangayEditorOpen}
+        onOpenChange={(open) => {
+          setBarangayEditorOpen(open);
+          if (!open) setBarangayError("");
+        }}
+      >
+        <DialogContent className="max-w-lg rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editingBarangay ? "Edit barangay" : "Add barangay"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingBarangay
+                ? "Changing the barangay name also updates the matching structured patient address field."
+                : "Create a barangay directory entry before patients are registered there."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Barangay name"
+              value={barangayForm.name}
+              onChange={(value: string) =>
+                setBarangayForm({ ...barangayForm, name: value })
+              }
+            />
+            <Field
+              label="Municipality / city"
+              value={barangayForm.municipality}
+              onChange={(value: string) =>
+                setBarangayForm({ ...barangayForm, municipality: value })
+              }
+            />
+            <Field
+              label="Province"
+              value={barangayForm.province}
+              onChange={(value: string) =>
+                setBarangayForm({ ...barangayForm, province: value })
+              }
+            />
+            <Field
+              label="Postal code"
+              value={barangayForm.postalCode}
+              onChange={(value: string) =>
+                setBarangayForm({ ...barangayForm, postalCode: value })
+              }
+            />
+          </div>
+          {barangayError ? (
+            <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {barangayError}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setBarangayEditorOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={saveBarangay}>
+              {editingBarangay ? "Save barangay" : "Add barangay"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog
+        open={!!deletingBarangay}
+        onOpenChange={(open) => !open && setDeletingBarangay(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete barangay?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove {deletingBarangay?.name} from the directory? This does not
+              delete patient records. A barangay with assigned patients cannot
+              be removed until those records are reassigned.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmBarangayDelete}>
+              Delete barangay
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <Dialog
+        open={!!selected}
+        onOpenChange={(open) => !open && setSelected(null)}
+      >
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto rounded-2xl p-0">
+          <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
+            <DialogTitle className="font-display text-2xl">
+              Patient profile
+            </DialogTitle>
+            <DialogDescription>
+              Private record view. Use Edit record only after verifying changes
+              with the patient.
+            </DialogDescription>
+          </DialogHeader>
+          {selected && (
+            <div className="space-y-6 px-6 py-5">
+              <div className="flex justify-between rounded-xl bg-primary-soft p-4">
+                <div>
+                  <p className="font-semibold">{selected.fullName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {selected.patientNumber || "Local patient record"} ·{" "}
+                    {selected.dob || "Birth date not recorded"}
+                  </p>
+                </div>
+                <Badge className="border-0 bg-card text-primary">
+                  Private record
+                </Badge>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Field
+                  label="Full name"
+                  value={selected.fullName || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, fullName: v })
+                  }
+                />
+                <Field
+                  label="Last / family name"
+                  value={selected.familyName || ""}
+                  disabled={!editing}
+                  onChange={(v: string) => updateNamePart("familyName", v)}
+                />
+                <Field
+                  label="First / given name"
+                  value={selected.givenName || ""}
+                  disabled={!editing}
+                  onChange={(v: string) => updateNamePart("givenName", v)}
+                />
+                <Field
+                  label="Middle name"
+                  value={selected.middleName || ""}
+                  disabled={!editing}
+                  onChange={(v: string) => updateNamePart("middleName", v)}
+                />
+                <Field
+                  label="Name suffix"
+                  value={selected.suffix || ""}
+                  disabled={!editing}
+                  onChange={(v: string) => updateNamePart("suffix", v)}
+                />
+                <Field
+                  label="Date of birth"
+                  value={selected.dob || ""}
+                  disabled={!editing}
+                  onChange={(v: string) => setSelected({ ...selected, dob: v })}
+                />
+                <Field
+                  label="Sex / administrative gender"
+                  value={selected.gender || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, gender: v })
+                  }
+                />
+                <Field
+                  label="Mobile number"
+                  value={selected.contact || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, contact: v })
+                  }
+                />
+                <Field
+                  label="Alternate number"
+                  value={selected.alternateContact || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, alternateContact: v })
+                  }
+                />
+                <Field
+                  label="Email address"
+                  value={selected.email || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, email: v })
+                  }
+                />
+                <Field
+                  label="Civil status"
+                  value={selected.civilStatus || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, civilStatus: v })
+                  }
+                />
+                <Field
+                  label="Nationality"
+                  value={selected.nationality || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, nationality: v })
+                  }
+                />
+                <Field
+                  label="Preferred language"
+                  value={selected.preferredLanguage || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, preferredLanguage: v })
+                  }
+                />
+                <Field
+                  label="Barangay"
+                  value={selected.barangay || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, barangay: v })
+                  }
+                />
+                <Field
+                  label="Municipality"
+                  value={selected.municipality || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, municipality: v })
+                  }
+                />
+                <Field
+                  label="Province"
+                  value={selected.province || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, province: v })
+                  }
+                />
+                <Field
+                  label="Postal code"
+                  value={selected.postalCode || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, postalCode: v })
+                  }
+                />
+                <Field
+                  label="Address / purok"
+                  value={selected.address || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, address: v })
+                  }
+                />
+                <Field
+                  label="Emergency contact"
+                  value={selected.emergencyContactPhone || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, emergencyContactPhone: v })
+                  }
+                />
+                <Field
+                  label="Emergency contact name"
+                  value={selected.emergencyContactName || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, emergencyContactName: v })
+                  }
+                />
+                <Field
+                  label="Emergency contact relationship"
+                  value={selected.emergencyContactRelationship || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({
+                      ...selected,
+                      emergencyContactRelationship: v,
+                    })
+                  }
+                />
+                <Field
+                  label="Parent / legal guardian"
+                  value={selected.guardianName || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, guardianName: v })
+                  }
+                />
+                <Field
+                  label="Guardian relationship"
+                  value={selected.guardianRelationship || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, guardianRelationship: v })
+                  }
+                />
+                <Field
+                  label="Guardian mobile number"
+                  value={selected.guardianContact || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, guardianContact: v })
+                  }
+                />
+                <Field
+                  label="PhilHealth client type"
+                  value={selected.philHealthClientType || "Not enrolled"}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, philHealthClientType: v })
+                  }
+                />
+                <Field
+                  label="PhilHealth PIN"
+                  value={selected.philHealthPin || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, philHealthPin: v })
+                  }
+                />
+                <Field
+                  label="Member / sponsor name"
+                  value={selected.philHealthMemberName || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, philHealthMemberName: v })
+                  }
+                />
+                <Field
+                  label="Member / sponsor PIN"
+                  value={selected.philHealthMemberPin || ""}
+                  disabled={!editing}
+                  onChange={(v: string) =>
+                    setSelected({ ...selected, philHealthMemberPin: v })
+                  }
+                />
+              </div>
+              <section className="border-t border-border pt-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-display text-lg font-bold">
+                      Checkup history
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Past completed consultations for this patient.
+                    </p>
+                  </div>
+                  <Badge variant="secondary">
+                    {checkups.length}{" "}
+                    {checkups.length === 1 ? "checkup" : "checkups"}
+                  </Badge>
+                </div>
+                {checkups.length ? (
+                  <div className="space-y-3">
+                    {checkups.map((record: any) => (
+                      <article
+                        key={record.id}
+                        className="rounded-xl border border-border bg-muted/20 p-4"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="font-semibold">
+                              {record.diagnosis || "Consultation completed"}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {record.date} ·{" "}
+                              {record.clinician || "Clinician not recorded"}
+                            </p>
+                          </div>
+                          <Badge className="border-0 bg-primary-soft text-primary">
+                            {record.status || "Completed"}
+                          </Badge>
+                        </div>
+                        {record.notes && (
+                          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                            {record.notes}
+                          </p>
+                        )}
+                        {record.prescription?.length > 0 && (
+                          <p className="mt-3 text-xs font-medium text-foreground">
+                            Prescription: {record.prescription.length} medicine
+                            {record.prescription.length === 1 ? "" : "s"}
+                          </p>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center text-sm text-muted-foreground">
+                    No completed checkups have been recorded for this patient
+                    yet.
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+          <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (window.confirm(`Delete ${selected.fullName}?`)) {
+                  remove(selected.id);
+                  setSelected(null);
+                }
+              }}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete record
+            </Button>
+            <div className="flex-1" />
+            <Button variant="outline" onClick={() => setSelected(null)}>
+              Close
+            </Button>
+            {editing ? (
+              <Button onClick={save}>Save changes</Button>
+            ) : (
+              <Button onClick={() => setEditing(true)}>
+                <Pencil className="w-4 h-4 mr-2" />
+                Edit record
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+function AppointmentPage({ appointments, patients, update, remove }: any) {
+  return (
+    <>
+      <Head
+        title="Appointments"
+        sub="View, reschedule, change status, or delete local visits."
+      />
+      <Panel title="Visits">
+        {appointments.map((a: any) => (
+          <Row
+            key={a.id}
+            title={`${patients.find((p: any) => p.id === a.patientId)?.fullName || "Unknown patient"} · ${a.queueNumber || "No number"}`}
+            detail={`${a.date} · ${a.queueStatus}`}
+            badge={a.visitType || "Scheduled"}
+            actions={
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const date = window.prompt("Date (YYYY-MM-DD)", a.date);
+                    if (date) update(a.id, { date });
+                  }}
+                >
+                  Reschedule
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() =>
+                    window.confirm("Delete visit?") && remove(a.id)
+                  }
+                >
+                  Delete
+                </Button>
+              </>
+            }
+          />
+        ))}
+        {!appointments.length && <Empty text="No visits yet." />}
+      </Panel>
+    </>
+  );
+}
+function ServicePage({ services, add, update, remove }: any) {
+  const [form, setForm] = useState({
+    name: "",
+    description: "",
+    duration: "20",
+    capacity: "20",
+  });
+  const [creating, setCreating] = useState(false);
+  const [viewing, setViewing] = useState<any>(null);
+  const [editing, setEditing] = useState<any>(null);
+  const [deleting, setDeleting] = useState<any>(null);
+  const create = () => {
+    if (
+      add({
+        ...form,
+        duration: Number(form.duration),
+        capacity: Number(form.capacity),
+        icon: "Stethoscope",
+        color: "primary",
+      })
+    ) {
+      setForm({ name: "", description: "", duration: "20", capacity: "20" });
+      setCreating(false);
+    }
+  };
+  const saveEdit = () => {
+    const service = {
+      ...editing,
+      duration: Number(editing.duration),
+      capacity: Number(editing.capacity),
+    };
+    update(service.id, service);
+    setViewing(service);
+    setEditing(null);
+  };
+  const formFields = (
+    <div className="grid sm:grid-cols-2 gap-4">
+      <Field
+        label="Service name"
+        value={form.name}
+        onChange={(v: string) => setForm({ ...form, name: v })}
+      />
+      <Field
+        label="Description"
+        value={form.description}
+        onChange={(v: string) => setForm({ ...form, description: v })}
+      />
+      <Field
+        label="Duration (minutes)"
+        value={form.duration}
+        onChange={(v: string) => setForm({ ...form, duration: v })}
+      />
+      <Field
+        label="Daily capacity"
+        value={form.capacity}
+        onChange={(v: string) => setForm({ ...form, capacity: v })}
+      />
+    </div>
+  );
+  const activeService = editing || viewing;
+  return (
+    <>
+      <Head
+        title="Services & schedules"
+        sub="View and manage clinic services."
+        action={
+          <Button
+            size="icon"
+            title="Create service"
+            aria-label="Create service"
+            onClick={() => setCreating(true)}
+          >
+            <Plus className="w-5 h-5" />
+          </Button>
+        }
+      />
+      <Panel title="Service catalogue">
+        {services.map((s: any) => (
+          <Row
+            key={s.id}
+            title={s.name}
+            detail={`${s.description} · ${s.capacity}/day · ${s.duration} min`}
+            badge="Active"
+            actions={
+              <Button
+                size="icon"
+                variant="outline"
+                title={`View ${s.name}`}
+                aria-label={`View ${s.name}`}
+                onClick={() => {
+                  setViewing({ ...s });
+                  setEditing(null);
+                }}
+              >
+                <Eye className="w-4 h-4" />
+              </Button>
+            }
+          />
+        ))}
+      </Panel>
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent className="max-w-2xl rounded-2xl p-0">
+          <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
+            <DialogTitle className="flex items-center gap-2 font-display text-2xl">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-soft">
+                <Stethoscope className="w-5 h-5 text-primary" />
+              </span>
+              Create clinic service
+            </DialogTitle>
+            <DialogDescription>
+              Define the service, expected duration, and daily capacity before
+              making it available to patients.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 py-5">{formFields}</div>
+          <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
+            <Button variant="outline" onClick={() => setCreating(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={create}>
+              <Plus className="w-4 h-4 mr-2" />
+              Create service
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!activeService}
+        onOpenChange={(open) => {
+          if (!open) {
+            setViewing(null);
+            setEditing(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl rounded-2xl p-0">
+          <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
+            <DialogTitle className="font-display text-2xl">
+              {editing ? "Edit service" : "Service details"}
+            </DialogTitle>
+            <DialogDescription>
+              {editing
+                ? "Update the complete service configuration. Changes apply to future bookings in this local prototype."
+                : "Review the service details before editing or deleting it."}
+            </DialogDescription>
+          </DialogHeader>
+          {activeService && (
+            <div className="px-6 py-5">
+              {editing ? (
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Service name"
+                    value={editing.name}
+                    onChange={(v: string) =>
+                      setEditing({ ...editing, name: v })
+                    }
+                  />
+                  <Field
+                    label="Description"
+                    value={editing.description}
+                    onChange={(v: string) =>
+                      setEditing({ ...editing, description: v })
+                    }
+                  />
+                  <Field
+                    label="Duration (minutes)"
+                    value={String(editing.duration)}
+                    onChange={(v: string) =>
+                      setEditing({ ...editing, duration: v })
+                    }
+                  />
+                  <Field
+                    label="Daily capacity"
+                    value={String(editing.capacity)}
+                    onChange={(v: string) =>
+                      setEditing({ ...editing, capacity: v })
+                    }
+                  />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="rounded-xl bg-primary-soft p-4">
+                    <p className="font-display text-xl font-bold">
+                      {viewing.name}
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {viewing.description || "No description added."}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-border p-4">
+                      <p className="text-xs text-muted-foreground">
+                        Expected duration
+                      </p>
+                      <p className="mt-1 font-semibold">
+                        {viewing.duration} minutes
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border p-4">
+                      <p className="text-xs text-muted-foreground">
+                        Daily capacity
+                      </p>
+                      <p className="mt-1 font-semibold">
+                        {viewing.capacity} patients
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
+            {editing ? (
+              <>
+                <Button variant="outline" onClick={() => setEditing(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={saveEdit}>Save service changes</Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="destructive"
+                  onClick={() => setDeleting(viewing)}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete service
+                </Button>
+                <div className="flex-1" />
+                <Button variant="outline" onClick={() => setViewing(null)}>
+                  Close
+                </Button>
+                <Button onClick={() => setEditing({ ...viewing })}>
+                  <Pencil className="w-4 h-4 mr-2" />
+                  Edit service
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog
+        open={!!deleting}
+        onOpenChange={(open) => !open && setDeleting(null)}
+      >
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete service?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete {deleting?.name}? This removes it from future booking
+              choices in this local prototype.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                remove(deleting.id);
+                setDeleting(null);
+                setViewing(null);
+                setEditing(null);
+              }}
+            >
+              Delete service
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+type ConsultationTemplateForm = Pick<
+  ConsultationTemplate,
+  "assessment" | "clinicalNotes" | "active"
+>;
+
+const emptyConsultationTemplate: ConsultationTemplateForm = {
+  assessment: "",
+  clinicalNotes: "",
+  active: true,
+};
+
+function ConsultationTemplatePage({
+  templates,
+  add,
+  update,
+  remove,
+}: {
+  templates: ConsultationTemplate[];
+  add: (template: ConsultationTemplateForm) => boolean;
+  update: (
+    id: string,
+    patch: Partial<Omit<ConsultationTemplate, "id" | "createdAt">>,
+  ) => void;
+  remove: (id: string) => void;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState<ConsultationTemplateForm>(
+    emptyConsultationTemplate,
+  );
+  const [viewing, setViewing] = useState<ConsultationTemplate | null>(null);
+  const [editing, setEditing] = useState<ConsultationTemplate | null>(null);
+  const [deleting, setDeleting] = useState<ConsultationTemplate | null>(null);
+  const [formError, setFormError] = useState("");
+  const activeTemplate = editing || viewing;
+
+  const validate = (template: ConsultationTemplateForm) => {
+    if (!template.assessment.trim() || !template.clinicalNotes.trim()) {
+      setFormError("Add both the assessment / diagnosis and clinical notes.");
+      return false;
+    }
+    return true;
+  };
+
+  const openCreate = () => {
+    setForm(emptyConsultationTemplate);
+    setFormError("");
+    setCreating(true);
+  };
+
+  const create = () => {
+    if (!validate(form)) return;
+    if (!add(form)) {
+      setFormError(
+        "A template with this assessment / diagnosis already exists.",
+      );
+      return;
+    }
+    setCreating(false);
+    setForm(emptyConsultationTemplate);
+  };
+
+  const saveEdit = () => {
+    if (!editing || !validate(editing)) return;
+    update(editing.id, {
+      assessment: editing.assessment,
+      clinicalNotes: editing.clinicalNotes,
+      active: editing.active,
+    });
+    setViewing({
+      ...editing,
+      assessment: editing.assessment.trim(),
+      clinicalNotes: editing.clinicalNotes.trim(),
+    });
+    setEditing(null);
+  };
+
+  return (
+    <>
+      <Head
+        title="Consultation templates"
+        sub="Create reusable assessment and clinical-note starters for Doctors. Doctors may always modify a template before saving a patient's consultation."
+        action={
+          <Button
+            size="icon"
+            title="Create consultation template"
+            aria-label="Create consultation template"
+            onClick={openCreate}
+          >
+            <Plus className="h-5 w-5" />
+          </Button>
+        }
+      />
+      <Panel title="Doctor consultation library">
+        {templates.map((template) => (
+          <Row
+            key={template.id}
+            title={template.assessment}
+            detail={
+              template.clinicalNotes.length > 112
+                ? `${template.clinicalNotes.slice(0, 112)}…`
+                : template.clinicalNotes
+            }
+            badge={template.active ? "Available to Doctors" : "Inactive"}
+            actions={
+              <Button
+                size="icon"
+                variant="outline"
+                title={`View ${template.assessment}`}
+                aria-label={`View ${template.assessment}`}
+                onClick={() => {
+                  setViewing({ ...template });
+                  setEditing(null);
+                  setFormError("");
+                }}
+              >
+                <Eye className="h-4 w-4" />
+              </Button>
+            }
+          />
+        ))}
+        {!templates.length ? (
+          <Empty text="No consultation templates yet. Create a template to give Doctors a consistent assessment and clinical-note starting point." />
+        ) : null}
+      </Panel>
+
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto rounded-2xl p-0">
+          <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
+            <DialogTitle className="flex items-center gap-2 font-display text-2xl">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-soft">
+                <ClipboardPlus className="h-5 w-5 text-primary" />
+              </span>
+              Create consultation template
+            </DialogTitle>
+            <DialogDescription>
+              This is a reusable clinical starting point. It does not create a
+              patient record until a Doctor applies it during a consultation.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 py-5">
+            <ConsultationTemplateFields
+              value={form}
+              onChange={(patch) => {
+                setForm((current) => ({ ...current, ...patch }));
+                setFormError("");
+              }}
+            />
+            {formError ? (
+              <p className="mt-3 text-sm text-destructive">{formError}</p>
+            ) : null}
+          </div>
+          <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
+            <Button variant="outline" onClick={() => setCreating(false)}>
+              Cancel
+            </Button>
+            <Button onClick={create}>
+              <Plus className="mr-2 h-4 w-4" />
+              Create template
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!activeTemplate}
+        onOpenChange={(open) => {
+          if (!open) {
+            setViewing(null);
+            setEditing(null);
+            setFormError("");
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto rounded-2xl p-0">
+          <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
+            <DialogTitle className="font-display text-2xl">
+              {editing ? "Edit consultation template" : "Consultation template"}
+            </DialogTitle>
+            <DialogDescription>
+              {editing
+                ? "Update the reusable assessment and clinical-note starter available to Doctors."
+                : "Review the template before editing, deactivating, or deleting it."}
+            </DialogDescription>
+          </DialogHeader>
+          {activeTemplate ? (
+            <div className="px-6 py-5">
+              {editing ? (
+                <>
+                  <ConsultationTemplateFields
+                    value={editing}
+                    onChange={(patch) => {
+                      setEditing((current) =>
+                        current ? { ...current, ...patch } : current,
+                      );
+                      setFormError("");
+                    }}
+                  />
+                  {formError ? (
+                    <p className="mt-3 text-sm text-destructive">{formError}</p>
+                  ) : null}
+                </>
+              ) : (
+                <div className="space-y-5">
+                  <div className="rounded-xl bg-primary-soft p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                      Assessment / diagnosis
+                    </p>
+                    <p className="mt-2 font-display text-xl font-bold">
+                      {viewing?.assessment}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-border p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Clinical notes
+                    </p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                      {viewing?.clinicalNotes}
+                    </p>
+                  </div>
+                  <Badge
+                    className={
+                      viewing?.active
+                        ? "border-0 bg-primary-soft text-primary"
+                        : "border-0 bg-muted text-muted-foreground"
+                    }
+                  >
+                    {viewing?.active
+                      ? "Available to Doctors"
+                      : "Inactive template"}
+                  </Badge>
+                </div>
+              )}
+            </div>
+          ) : null}
+          <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
+            {editing ? (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditing(null);
+                    setFormError("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="button" onClick={saveEdit}>
+                  Save template changes
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="destructive"
+                  onClick={() => setDeleting(viewing)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete template
+                </Button>
+                <div className="flex-1" />
+                <Button variant="outline" onClick={() => setViewing(null)}>
+                  Close
+                </Button>
+                <Button
+                  onClick={() => {
+                    setEditing({ ...viewing! });
+                    setFormError("");
+                  }}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit template
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={!!deleting}
+        onOpenChange={(open) => !open && setDeleting(null)}
+      >
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete consultation template?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete “{deleting?.assessment}”? Existing patient consultation
+              records are not changed, but Doctors will no longer be able to
+              select this template.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (!deleting) return;
+                remove(deleting.id);
+                setDeleting(null);
+                setViewing(null);
+                setEditing(null);
+              }}
+            >
+              Delete template
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+function ConsultationTemplateFields({
+  value,
+  onChange,
+}: {
+  value: ConsultationTemplateForm;
+  onChange: (patch: Partial<ConsultationTemplateForm>) => void;
+}) {
+  return (
+    <div className="grid gap-4">
+      <Field
+        label="Assessment / diagnosis"
+        value={value.assessment}
+        onChange={(assessment: string) => onChange({ assessment })}
+      />
+      <div>
+        <Label>Clinical notes</Label>
+        <Textarea
+          value={value.clinicalNotes}
+          onChange={(event) => onChange({ clinicalNotes: event.target.value })}
+          placeholder="Example: Advise rest, fluids, treatment plan, monitoring, and return precautions."
+          className="mt-1 min-h-32"
+        />
+      </div>
+      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-muted/20 p-4">
+        <input
+          type="checkbox"
+          checked={value.active}
+          onChange={(event) => onChange({ active: event.target.checked })}
+          className="mt-1 h-4 w-4 accent-primary"
+        />
+        <span>
+          <span className="block text-sm font-semibold">
+            Available to Doctors
+          </span>
+          <span className="mt-1 block text-xs text-muted-foreground">
+            Inactive templates remain in Admin for future use but are hidden
+            from the Doctor template picker.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+function StaffPage({ users, add, update, remove }: any) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    fullName: "",
+    username: "",
+    role: "Front desk",
+    active: true,
+    availability: "Available",
+    availabilityNote: "",
+  });
+  const create = () => {
+    if (add(form)) {
+      setForm({
+        fullName: "",
+        username: "",
+        role: "Front desk",
+        active: true,
+        availability: "Available",
+        availabilityNote: "",
+      });
+      setOpen(false);
+    }
+  };
+  return (
+    <>
+      <Head
+        title="Staff & roles"
+        sub="Create users and maintain their current work availability."
+        action={
+          <Button onClick={() => setOpen(true)}>
+            <UserPlus className="w-4 h-4 mr-2" />
+            Create staff user
+          </Button>
+        }
+      />
+      <Panel title="Staff directory">
+        {users.map((u: any) => (
+          <Row
+            key={u.id}
+            title={u.fullName}
+            detail={`@${u.username} · ${u.active ? "Account active" : "Account inactive"} · ${u.availability || "Available"}${u.availabilityNote ? ` · ${u.availabilityNote}` : ""}`}
+            badge={`${u.role} · ${u.availability || "Available"}`}
+            actions={
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const availability = window.prompt(
+                      "Availability: Available, On leave, In travel, Off duty, Unavailable",
+                      u.availability || "Available",
+                    );
+                    if (availability)
+                      update(u.id, {
+                        availability,
+                        availabilityNote:
+                          window.prompt(
+                            "Availability note / return date",
+                            u.availabilityNote || "",
+                          ) || "",
+                      });
+                  }}
+                >
+                  Set status
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => update(u.id, { active: !u.active })}
+                >
+                  {u.active ? "Deactivate" : "Activate"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() =>
+                    window.confirm(`Delete ${u.fullName}?`) && remove(u.id)
+                  }
+                >
+                  Delete
+                </Button>
+              </>
+            }
+          />
+        ))}
+        {!users.length && (
+          <Empty text="No staff users yet. Use Create staff user to add the first role." />
+        )}
+      </Panel>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-xl rounded-2xl p-0">
+          <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
+            <DialogTitle className="flex items-center gap-2 font-display text-2xl">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-soft">
+                <UserPlus className="w-5 h-5 text-primary" />
+              </span>
+              Create staff user
+            </DialogTitle>
+            <DialogDescription>
+              Set the staff member’s role and current availability for this
+              local prototype.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 px-6 py-5">
+            <Field
+              label="Full name"
+              value={form.fullName}
+              onChange={(v: string) => setForm({ ...form, fullName: v })}
+            />
+            <Field
+              label="Username"
+              value={form.username}
+              onChange={(v: string) => setForm({ ...form, username: v })}
+            />
+            <div>
+              <Label>Role</Label>
+              <select
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {[
+                  "Front desk",
+                  "Nurse / Triage",
+                  "Doctor",
+                  "Pharmacy",
+                  "Administrator",
+                ].map((role) => (
+                  <option key={role}>{role}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Current availability</Label>
+              <select
+                value={form.availability}
+                onChange={(e) =>
+                  setForm({ ...form, availability: e.target.value })
+                }
+                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {[
+                  "Available",
+                  "On leave",
+                  "In travel",
+                  "Off duty",
+                  "Unavailable",
+                ].map((status) => (
+                  <option key={status}>{status}</option>
+                ))}
+              </select>
+            </div>
+            <Field
+              label="Availability note / return date (optional)"
+              value={form.availabilityNote}
+              onChange={(v: string) =>
+                setForm({ ...form, availabilityNote: v })
+              }
+            />
+          </div>
+          <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={create}>
+              <Plus className="w-4 h-4 mr-2" />
+              Create user
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+function MedicinePage({ medicines, add, update, remove }: any) {
+  const [name, setName] = useState("");
+  return (
+    <>
+      <Head
+        title="Medicine catalogue"
+        sub="Create, edit, or remove local medicine items."
+        action={
+          <Button
+            onClick={() => {
+              if (!name) return;
+              add({
+                name,
+                strength: "",
+                form: "Tablet",
+                stock: 0,
+                reorderLevel: 0,
+                expiry: "Not set",
+                batch: "Not set",
+              });
+              setName("");
+            }}
+          >
+            Add medicine
+          </Button>
+        }
+      />
+      <Input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="New medicine name"
+        className="mb-4"
+      />
+      <Panel title="Medicine items">
+        {medicines.map((m: any) => (
+          <Row
+            key={m.id}
+            title={`${m.name} ${m.strength}`}
+            detail={`${m.form} · ${m.stock} in stock · Batch ${m.batch}`}
+            badge="Medicine"
+            actions={
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const stock = window.prompt("Stock", String(m.stock));
+                    if (stock !== null)
+                      update(m.id, { stock: Number(stock) || 0 });
+                  }}
+                >
+                  Edit stock
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() =>
+                    window.confirm(`Delete ${m.name}?`) && remove(m.id)
+                  }
+                >
+                  Delete
+                </Button>
+              </>
+            }
+          />
+        ))}
+      </Panel>
+    </>
+  );
+}
+function Head({
+  title,
+  sub,
+  action,
+}: {
+  title: string;
+  sub?: string;
+  action?: any;
+}) {
+  return (
+    <div className="mb-6 flex flex-wrap justify-between gap-3">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[.15em] text-primary">
+          Administration
+        </p>
+        <h2 className="font-display text-3xl font-bold">{title}</h2>
+        {sub && <p className="text-sm text-muted-foreground">{sub}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+function Panel({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: any;
+  children: any;
+}) {
+  return (
+    <section className="mb-5 overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-soft">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h3 className="font-display font-bold">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+function Row({ title, detail, badge, actions, onClick }: any) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-3 last:border-0">
+      {onClick ? (
+        <button
+          type="button"
+          onClick={onClick}
+          className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        >
+          <p className="font-medium hover:text-primary">{title}</p>
+          <p className="text-xs text-muted-foreground">{detail}</p>
+        </button>
+      ) : (
+        <div>
+          <p className="font-medium">{title}</p>
+          <p className="text-xs text-muted-foreground">{detail}</p>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <Badge className="bg-primary-soft text-primary border-0">{badge}</Badge>
+        {actions}
+      </div>
+    </div>
+  );
+}
+function Field({
+  label,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <Input
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 disabled:bg-muted disabled:text-muted-foreground"
+      />
+    </div>
+  );
+}
+function Kpi({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5 shadow-soft">
+      <p className="font-display text-3xl font-bold">{value}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+function Empty({ text }: { text: string }) {
+  return (
+    <p className="p-5 text-center text-sm text-muted-foreground">{text}</p>
+  );
+}
