@@ -17,11 +17,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { MedicalRecord } from "@/data/mockData";
 import { cn } from "@/lib/utils";
-import { usePrototypeStore } from "@/lib/prototype-store";
+import {
+  usePrototypeStore,
+  type DoctorAvailability,
+  type StaffUser,
+} from "@/lib/prototype-store";
 
 type PrescriptionDraft = MedicalRecord["prescription"][number];
 
-export function DoctorApp() {
+export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
   const {
     appointments,
     patients,
@@ -30,9 +34,16 @@ export function DoctorApp() {
     medicalRecords,
     triage,
     completeConsultation,
+    staffUsers,
+    updateStaffUser,
   } = usePrototypeStore();
+  const currentDoctor = currentUser
+    ? staffUsers.find((user) => user.id === currentUser.id)
+    : undefined;
   const ready = appointments.filter(
-    (appointment) => appointment.queueStatus === "In Consultation",
+    (appointment) =>
+      appointment.queueStatus === "Called" ||
+      appointment.queueStatus === "In Consultation",
   );
   const [id, setId] = useState("");
   const [medicineId, setMedicineId] = useState("");
@@ -156,12 +167,14 @@ export function DoctorApp() {
       current.filter((item) => item.medicineId !== idToRemove),
     );
   const complete = () => {
-    if (!appointment || !diagnosis.trim()) return;
+    if (!appointment || !diagnosis.trim() || currentDoctor?.role !== "Doctor")
+      return;
     completeConsultation(
       appointment.id,
       diagnosis.trim(),
       notes.trim(),
       prescription,
+      currentDoctor.id,
     );
   };
 
@@ -182,6 +195,34 @@ export function DoctorApp() {
           verify and dispense. External prescriptions remain outside SmartServe.
         </p>
       </div>
+      {currentDoctor?.role === "Doctor" ? (
+        <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/15 bg-primary-soft/50 px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold">Your patient-facing availability</p>
+            <p className="text-xs text-muted-foreground">Patients see a privacy-safe availability message before booking.</p>
+          </div>
+          <select
+            aria-label="Your availability"
+            value={currentDoctor.doctorStatus || "Available"}
+            onChange={(event) =>
+              updateStaffUser(currentDoctor.id, {
+                doctorStatus: event.target.value as DoctorAvailability,
+              })
+            }
+            className="h-10 rounded-xl border border-input bg-background px-3 text-sm font-medium"
+          >
+            {[
+              "Available",
+              "With patient",
+              "On break",
+              "Off duty",
+              "On leave",
+            ].map((status) => (
+              <option key={status} value={status}>{status}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       <div className="grid lg:grid-cols-[280px,1fr] gap-5">
         <aside className="bg-card border border-border rounded-2xl p-4 shadow-soft">
           <div className="flex items-center gap-2 mb-4">
@@ -214,7 +255,7 @@ export function DoctorApp() {
           ))}
           {!ready.length ? (
             <p className="text-sm text-muted-foreground">
-              No patient has arrived from the queue desk.
+              No patient is currently being served.
             </p>
           ) : null}
         </aside>
@@ -558,7 +599,7 @@ export function DoctorApp() {
                   className="mt-1 min-h-24"
                 />
                 <Button
-                  disabled={!diagnosis.trim()}
+                  disabled={!diagnosis.trim() || currentDoctor?.role !== "Doctor"}
                   onClick={complete}
                   className="mt-4"
                 >

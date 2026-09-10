@@ -30,6 +30,15 @@ export type AuditEvent = {
   action: string;
   reference: string;
 };
+export type PatientNotification = {
+  id: string;
+  patientId: string;
+  title: string;
+  message: string;
+  createdAt: string;
+  read: boolean;
+  type: "reminder" | "update" | "alert";
+};
 export type MigrationRow = Record<string, string>;
 export type ImportSummary = {
   patientsAdded: number;
@@ -38,16 +47,33 @@ export type ImportSummary = {
   skipped: number;
 };
 type PortalAccount = { patientId: string; mobile: string; password: string };
+export type StaffRole =
+  | "Front desk"
+  | "Nurse / Triage"
+  | "Doctor"
+  | "Pharmacy"
+  | "Administrator";
+export type DoctorAvailability =
+  | "Available"
+  | "With patient"
+  | "On break"
+  | "Off duty"
+  | "On leave";
 export type StaffUser = {
   id: string;
   fullName: string;
   username: string;
-  role:
-    "Front desk" | "Nurse / Triage" | "Doctor" | "Pharmacy" | "Administrator";
+  /** Prototype only: production must store a server-side password hash, never this value. */
+  password: string;
+  role: StaffRole;
   active: boolean;
-  availability:
-    "Available" | "On leave" | "In travel" | "Off duty" | "Unavailable";
-  availabilityNote?: string;
+  passwordChangeRequired: boolean;
+  /** Only doctors publish a care-availability state to the patient portal. */
+  doctorStatus?: DoctorAvailability;
+  recoveryEmail?: string;
+  mobile?: string;
+  title?: string;
+  notes?: string;
 };
 export type BarangayDirectoryEntry = {
   id: string;
@@ -113,6 +139,13 @@ type PortalRegistrationInput = Pick<
       | "locationAccuracy"
       | "locationVerified"
       | "locationVerifiedAt"
+      | "mobileLocationVerifiedAt"
+      | "mobileLocationBarangay"
+      | "mobileLocationMunicipality"
+      | "mobileLocationProvince"
+      | "mobileLocationAccuracy"
+      | "consentToTreatment"
+      | "privacyAcknowledged"
     >
   >;
 type Store = {
@@ -127,6 +160,7 @@ type Store = {
   triage: TriageRecord[];
   audit: AuditEvent[];
   accounts: PortalAccount[];
+  notifications: PatientNotification[];
   checkIn: (id: string, queueNumber: string) => boolean;
   markAbsent: (id: string) => void;
   completeTriage: (record: Omit<TriageRecord, "completedAt">) => void;
@@ -144,12 +178,12 @@ type Store = {
     reason: string,
   ) => boolean;
   callNext: () => void;
-  sendToDoctor: (id: string) => void;
   completeConsultation: (
     id: string,
     diagnosis: string,
     notes: string,
     prescription: MedicalRecord["prescription"],
+    doctorId: string,
   ) => void;
   updatePatient: (id: string, patch: Partial<Patient>) => void;
   deletePatient: (id: string) => void;
@@ -169,8 +203,10 @@ type Store = {
   ) => void;
   deleteConsultationTemplate: (id: string) => void;
   addStaffUser: (user: Omit<StaffUser, "id">) => boolean;
-  updateStaffUser: (id: string, patch: Partial<StaffUser>) => void;
+  updateStaffUser: (id: string, patch: Partial<StaffUser>) => boolean;
   deleteStaffUser: (id: string) => void;
+  loginStaff: (username: string, password: string) => StaffUser | null;
+  markNotificationRead: (id: string) => void;
   addBarangay: (barangay: Omit<BarangayDirectoryEntry, "id">) => boolean;
   updateBarangay: (
     currentName: string,
@@ -211,6 +247,7 @@ const seed = () => ({
   triage: [] as TriageRecord[],
   audit: [] as AuditEvent[],
   accounts: [] as PortalAccount[],
+  notifications: [] as PatientNotification[],
 });
 const normalizeHeader = (value: string) =>
   value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -249,10 +286,39 @@ const mergeSeedServices = (savedServices: Service[]) => {
     ...seedServices.filter((service) => !currentIds.has(service.id)),
   ];
 };
+const legacyAvailabilityToDoctorStatus = (value: unknown): DoctorAvailability => {
+  switch (value) {
+    case "On leave":
+      return "On leave";
+    case "Off duty":
+      return "Off duty";
+    case "Unavailable":
+    case "In travel":
+      return "On break";
+    default:
+      return "Available";
+  }
+};
 const hydrate = (saved: Partial<ReturnType<typeof seed>>) => ({
   ...seed(),
   ...saved,
+  notifications: Array.isArray(saved.notifications) ? saved.notifications : [],
   barangays: Array.isArray(saved.barangays) ? saved.barangays : [],
+  staffUsers: Array.isArray(saved.staffUsers)
+    ? saved.staffUsers.map((savedUser) => {
+        const legacy = savedUser as StaffUser & { availability?: unknown; availabilityNote?: string };
+        return {
+          ...legacy,
+          password: typeof legacy.password === "string" ? legacy.password : "",
+          passwordChangeRequired: Boolean(legacy.passwordChangeRequired),
+          doctorStatus:
+            legacy.role === "Doctor"
+              ? legacy.doctorStatus || legacyAvailabilityToDoctorStatus(legacy.availability)
+              : undefined,
+          notes: legacy.notes || legacy.availabilityNote || undefined,
+        };
+      })
+    : [],
   services: mergeSeedServices(saved.services || []),
 });
 
@@ -666,6 +732,9 @@ export function PrototypeStoreProvider({
             (record) => record.patientId !== id,
           ),
           accounts: d.accounts.filter((account) => account.patientId !== id),
+          notifications: d.notifications.filter(
+            (notification) => notification.patientId !== id,
+          ),
         })),
       updateAppointment: (id, patch) =>
         change("Administrator", "Updated appointment", id, (d) => ({
@@ -780,6 +849,7 @@ export function PrototypeStoreProvider({
         if (
           !user.fullName.trim() ||
           !user.username.trim() ||
+          user.password.trim().length < 4 ||
           data.staffUsers.some(
             (item) =>
               item.username.toLowerCase() ===
@@ -787,23 +857,69 @@ export function PrototypeStoreProvider({
           )
         )
           return false;
-        change("Administrator", "Created staff user", user.username, (d) => ({
+        const normalized: Omit<StaffUser, "id"> = {
+          ...user,
+          fullName: user.fullName.trim(),
+          username: user.username.trim(),
+          password: user.password.trim(),
+          doctorStatus:
+            user.role === "Doctor" ? user.doctorStatus || "Available" : undefined,
+        };
+        change("Administrator", "Created staff user", normalized.username, (d) => ({
           ...d,
-          staffUsers: [...d.staffUsers, { ...user, id: crypto.randomUUID() }],
+          staffUsers: [...d.staffUsers, { ...normalized, id: crypto.randomUUID() }],
         }));
         return true;
       },
-      updateStaffUser: (id, patch) =>
+      updateStaffUser: (id, patch) => {
+        const username = patch.username?.trim();
+        if (
+          username &&
+          data.staffUsers.some(
+            (user) =>
+              user.id !== id &&
+              user.username.toLowerCase() === username.toLowerCase(),
+          )
+        )
+          return false;
         change("Administrator", "Updated staff user", id, (d) => ({
           ...d,
           staffUsers: d.staffUsers.map((user) =>
-            user.id === id ? { ...user, ...patch } : user,
+            user.id === id
+              ? {
+                  ...user,
+                  ...patch,
+                  username: username || user.username,
+                  doctorStatus:
+                    (patch.role || user.role) === "Doctor"
+                      ? patch.doctorStatus || user.doctorStatus || "Available"
+                      : undefined,
+                }
+              : user,
           ),
-        })),
+        }));
+        return true;
+      },
       deleteStaffUser: (id) =>
         change("Administrator", "Deleted staff user", id, (d) => ({
           ...d,
           staffUsers: d.staffUsers.filter((user) => user.id !== id),
+        })),
+      loginStaff: (username, password) =>
+        data.staffUsers.find(
+          (user) =>
+            user.active &&
+            user.username.toLowerCase() === username.trim().toLowerCase() &&
+            user.password === password,
+        ) || null,
+      markNotificationRead: (id) =>
+        change("Patient", "Read notification", id, (d) => ({
+          ...d,
+          notifications: d.notifications.map((notification) =>
+            notification.id === id
+              ? { ...notification, read: true }
+              : notification,
+          ),
         })),
       addBarangay: (barangay) => {
         const name = barangay.name.trim();
@@ -901,7 +1017,11 @@ export function PrototypeStoreProvider({
         }));
         return true;
       },
-      bookAppointment: (patientId, serviceId, date) =>
+      bookAppointment: (patientId, serviceId, date) => {
+        const createdAt = now();
+        const serviceName =
+          data.services.find((service) => service.id === serviceId)?.name ||
+          "clinic service";
         change("Patient", "Created booking", serviceId, (d) => ({
           ...d,
           appointments: [
@@ -915,11 +1035,24 @@ export function PrototypeStoreProvider({
               attendanceStatus: "Pending",
               queueStatus: "Scheduled",
               room: "To be assigned",
-              createdAt: now(),
+              createdAt,
             },
             ...d.appointments,
           ],
-        })),
+          notifications: [
+            {
+              id: crypto.randomUUID(),
+              patientId,
+              title: "Booking received",
+              message: `Your ${serviceName} booking for ${date} was recorded. Please wait for clinic confirmation and check in on your appointment date.`,
+              createdAt,
+              read: false,
+              type: "update",
+            },
+            ...d.notifications,
+          ].slice(0, 100),
+        }));
+      },
       cancelAppointment: (id) =>
         change("Patient", "Cancelled appointment", id, (d) => ({
           ...d,
@@ -988,6 +1121,22 @@ export function PrototypeStoreProvider({
                   }
                 : a,
             ),
+            notifications: (() => {
+              const appointment = d.appointments.find((a) => a.id === id);
+              if (!appointment) return d.notifications;
+              return [
+                {
+                  id: crypto.randomUUID(),
+                  patientId: appointment.patientId,
+                  title: "Check-in confirmed",
+                  message: `You are present at the clinic. Your queue number is ${queueNumber}. Please wait for your number to be called.`,
+                  createdAt: checkedInAt,
+                  read: false,
+                  type: "alert" as const,
+                },
+                ...d.notifications,
+              ].slice(0, 100);
+            })(),
           }),
         );
         return true;
@@ -1065,8 +1214,8 @@ export function PrototypeStoreProvider({
           locationVerifiedAt: input.locationVerified
             ? input.locationVerifiedAt || now()
             : undefined,
-          consentToTreatment: false,
-          privacyAcknowledged: true,
+          consentToTreatment: input.consentToTreatment ?? false,
+          privacyAcknowledged: input.privacyAcknowledged ?? false,
         };
         change("Patient", "Created portal account", patient.id, (d) => ({
           ...d,
@@ -1173,7 +1322,9 @@ export function PrototypeStoreProvider({
       callNext: () => {
         if (
           data.appointments.some(
-            (appointment) => appointment.queueStatus === "Called",
+            (appointment) =>
+              appointment.queueStatus === "Called" ||
+              appointment.queueStatus === "In Consultation",
           )
         )
           return;
@@ -1181,7 +1332,7 @@ export function PrototypeStoreProvider({
         if (!next) return;
         change(
           "Queue staff",
-          `Called ${(next.triagePriority ?? "Normal").toLowerCase()} queue number`,
+          `Called ${(next.triagePriority ?? "Normal").toLowerCase()} queue number for consultation`,
           next.id,
           (d) => ({
             ...d,
@@ -1190,17 +1341,27 @@ export function PrototypeStoreProvider({
                 ? { ...appointment, queueStatus: "Called" }
                 : appointment,
             ),
+            notifications: [
+              {
+                id: crypto.randomUUID(),
+                patientId: next.patientId,
+                title: "You are now being served",
+                message: `Queue number ${next.queueNumber || "assigned"} is now being served. Please proceed to ${next.room || "the assigned room"} for your consultation.`,
+                createdAt: now(),
+                read: false,
+                type: "alert",
+              },
+              ...d.notifications,
+            ].slice(0, 100),
           }),
         );
       },
-      sendToDoctor: (id) =>
-        change("Queue staff", "Patient arrived at consultation", id, (d) => ({
-          ...d,
-          appointments: d.appointments.map((a) =>
-            a.id === id ? { ...a, queueStatus: "In Consultation" } : a,
-          ),
-        })),
-      completeConsultation: (id, diagnosis, notes, prescription) => {
+      completeConsultation: (id, diagnosis, notes, prescription, doctorId) => {
+        const clinician = data.staffUsers.find(
+          (user) =>
+            user.id === doctorId && user.role === "Doctor" && user.active,
+        );
+        if (!clinician) return;
         const permittedMedicineIds = new Set(
           data.medicines
             .filter((medicine) => medicine.stock > 0)
@@ -1227,7 +1388,7 @@ export function PrototypeStoreProvider({
         }, []);
         change(
           "Doctor",
-          `Completed consultation with ${recordedPrescription.length} clinic prescription item(s)`,
+          `${clinician.fullName} completed consultation with ${recordedPrescription.length} clinic prescription item(s)`,
           id,
           (d) => {
             const appointment = d.appointments.find((a) => a.id === id);
@@ -1244,7 +1405,8 @@ export function PrototypeStoreProvider({
                   id: crypto.randomUUID(),
                   patientId: appointment.patientId,
                   date: new Date().toISOString().slice(0, 10),
-                  clinician: "Dr. Joseph Mariano",
+                  clinicianId: clinician.id,
+                  clinician: clinician.fullName,
                   diagnosis,
                   notes,
                   prescription: recordedPrescription,

@@ -23,14 +23,20 @@ const JONES_CENTER: [number, number] = [16.5613, 121.7023];
 function MapClickHandler({
   onChange,
   onManualPosition,
+  allowManualPin,
 }: {
-  onChange: (location: PinnedLocation) => void;
+  onChange: (location: PinnedLocation, method?: LocationMethod) => void;
   onManualPosition?: () => void;
+  allowManualPin: boolean;
 }) {
   useMapEvents({
     click(event) {
-      onChange({ latitude: event.latlng.lat, longitude: event.latlng.lng });
+      if (!allowManualPin) return;
       onManualPosition?.();
+      onChange(
+        { latitude: event.latlng.lat, longitude: event.latlng.lng },
+        "Manually adjusted",
+      );
     },
   });
 
@@ -53,9 +59,10 @@ function RecenterOnPin({ value }: { value: PinnedLocation | null }) {
 
 interface LocationPickerMapProps {
   value: PinnedLocation | null;
-  onChange: (location: PinnedLocation) => void;
+  onChange: (location: PinnedLocation, method?: LocationMethod) => void;
   onLocationMethodChange?: (method: LocationMethod, accuracy?: number) => void;
   showCurrentLocation?: boolean;
+  allowManualPin?: boolean;
 }
 
 export function LocationPickerMap({
@@ -63,6 +70,7 @@ export function LocationPickerMap({
   onChange,
   onLocationMethodChange,
   showCurrentLocation = true,
+  allowManualPin = true,
 }: LocationPickerMapProps) {
   const [isLocating, setIsLocating] = useState(false);
   const [locationStatus, setLocationStatus] = useState("");
@@ -81,12 +89,12 @@ export function LocationPickerMap({
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         const accuracy = Math.round(coords.accuracy);
+        onLocationMethodChange?.("Current device location", accuracy);
         onChange({
           latitude: coords.latitude,
           longitude: coords.longitude,
           accuracy,
-        });
-        onLocationMethodChange?.("Current device location", accuracy);
+        }, "Current device location");
         setLocationStatus(
           `Device location captured (estimated accuracy ±${accuracy} m). Confirm the pin with the patient.`,
         );
@@ -118,6 +126,7 @@ export function LocationPickerMap({
         />
         <MapClickHandler
           onChange={onChange}
+          allowManualPin={allowManualPin}
           onManualPosition={() => {
             onLocationMethodChange?.("Manually adjusted");
             setLocationStatus(
@@ -157,7 +166,9 @@ export function LocationPickerMap({
       <div className="pointer-events-none absolute bottom-2 left-2 z-[500] flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-lg bg-background/95 px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur">
         <MapPin className="h-3.5 w-3.5 text-primary" />
         {showCurrentLocation
-          ? "Search the address or use current location, then tap the map to fine-tune the pin."
+          ? allowManualPin
+            ? "Search the address or use current location, then tap the map to fine-tune the pin."
+            : "Use current location to verify your registered barangay."
           : "Search the entered address, then tap the map to fine-tune the pin."}
       </div>
 

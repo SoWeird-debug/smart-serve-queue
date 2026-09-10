@@ -73,6 +73,11 @@ export interface Patient {
   locationAccuracy?: number;
   locationVerified?: boolean;
   locationVerifiedAt?: string;
+  mobileLocationVerifiedAt?: string;
+  mobileLocationBarangay?: string;
+  mobileLocationMunicipality?: string;
+  mobileLocationProvince?: string;
+  mobileLocationAccuracy?: number;
   consentToTreatment?: boolean;
   privacyAcknowledged?: boolean;
 }
@@ -143,6 +148,8 @@ export interface MedicalRecord {
   id: string;
   patientId: string;
   date: string;
+  /** The signed-in doctor account that completed the consultation. */
+  clinicianId?: string;
   clinician: string;
   diagnosis: string;
   notes: string;

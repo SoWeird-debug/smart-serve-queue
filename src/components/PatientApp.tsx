@@ -8,6 +8,7 @@ import {
   TestTube,
   ShieldPlus,
   Bell,
+  BellOff,
   Calendar,
   Clock,
   ChevronLeft,
@@ -28,15 +29,30 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { helpers, type Patient, type Service } from "@/data/mockData";
 import {
   LocationPickerMap,
   type PinnedLocation,
 } from "@/components/LocationPickerMap";
-import { usePrototypeStore } from "@/lib/prototype-store";
+import {
+  type PatientNotification,
+  usePrototypeStore,
+} from "@/lib/prototype-store";
 import { calculateAge } from "@/lib/patient-age";
-import { reverseGeocodePhilippineAddress } from "@/lib/location-address";
+import {
+  reverseGeocodePhilippineAddress,
+  type DetectedPhilippineAddress,
+} from "@/lib/location-address";
+import { compareBarangayLocation } from "@/lib/location-verification";
 
 const iconMap = {
   Stethoscope,
@@ -53,13 +69,15 @@ const rememberedMobileKey = "smartserve-patient-remembered-mobile";
 type Screen =
   | "login"
   | "register"
+  | "verifyLocation"
   | "home"
   | "services"
   | "schedule"
   | "confirm"
   | "myAppts"
   | "records"
-  | "notif";
+  | "notif"
+  | "profile";
 
 export function PatientApp() {
   const [patientId, setPatientId] = useState<string | null>(() =>
@@ -72,16 +90,18 @@ export function PatientApp() {
   const [selectedDate, setSelectedDate] = useState<number>(
     new Date().getDate() + 1,
   );
-  const [selectedLocation, setSelectedLocation] =
-    useState<PinnedLocation | null>(null);
   const {
     patients,
     services,
     bookAppointment,
     registerPortalPatient,
     loginPatient,
+    updatePatient,
+    notifications,
+    markNotificationRead,
   } = usePrototypeStore();
   const me = patients.find((patient) => patient.id === patientId) || null;
+  const locationReady = Boolean(me?.mobileLocationVerifiedAt);
   useEffect(() => {
     if (patientId && !me) {
       localStorage.removeItem(rememberedSessionKey);
@@ -99,6 +119,18 @@ export function PatientApp() {
     localStorage.removeItem(rememberedSessionKey);
     setPatientId(null);
     setScreen("login");
+  };
+  const openServices = () =>
+    setScreen(locationReady ? "services" : "verifyLocation");
+  const navigate = (next: Screen) => {
+    if (
+      !locationReady &&
+      (next === "services" || next === "schedule" || next === "confirm")
+    ) {
+      setScreen("verifyLocation");
+      return;
+    }
+    setScreen(next);
   };
 
   return (
@@ -137,14 +169,21 @@ export function PatientApp() {
               onBack={() => setScreen("login")}
             />
           )}
+          {screen === "verifyLocation" && me && (
+            <PatientLocationVerificationScreen
+              patient={me}
+              updatePatient={updatePatient}
+              onBack={() => setScreen("home")}
+              onVerified={() => setScreen("services")}
+            />
+          )}
           {screen === "home" && me && (
             <HomeScreen
               me={me}
               services={services}
-              onBook={() => setScreen("services")}
+              onBook={openServices}
               onView={() => setScreen("myAppts")}
               onNotif={() => setScreen("notif")}
-              onSignOut={signOut}
             />
           )}
           {screen === "services" && (
@@ -153,19 +192,17 @@ export function PatientApp() {
               onBack={() => setScreen("home")}
               onPick={(id) => {
                 setSelectedService(id);
-                setSelectedLocation(null);
                 setScreen("schedule");
               }}
             />
           )}
-          {screen === "schedule" && (
+          {screen === "schedule" && me && (
             <ScheduleScreen
               services={services}
+              patient={me}
               serviceId={selectedService!}
               date={selectedDate}
-              location={selectedLocation}
               onDate={setSelectedDate}
-              onLocation={setSelectedLocation}
               onBack={() => setScreen("services")}
               onConfirm={() => setScreen("confirm")}
             />
@@ -175,7 +212,7 @@ export function PatientApp() {
               services={services}
               serviceId={selectedService!}
               date={selectedDate}
-              location={selectedLocation!}
+              patient={me}
               onDone={() => {
                 bookAppointment(
                   me.id,
@@ -206,12 +243,27 @@ export function PatientApp() {
             />
           )}
           {screen === "notif" && (
-            <NotifScreen onBack={() => setScreen("home")} />
+            <NotifScreen
+              notifications={notifications.filter(
+                (notification) => notification.patientId === me?.id,
+              )}
+              markNotificationRead={markNotificationRead}
+              onBack={() => setScreen("home")}
+            />
+          )}
+          {screen === "profile" && me && (
+            <ProfileScreen
+              patient={me}
+              updatePatient={updatePatient}
+              onSignOut={signOut}
+            />
           )}
         </div>
 
-        {screen !== "login" && screen !== "register" && (
-          <BottomNav screen={screen} setScreen={setScreen} />
+        {screen !== "login" &&
+          screen !== "register" &&
+          screen !== "verifyLocation" && (
+          <BottomNav screen={screen} setScreen={navigate} />
         )}
       </div>
     </div>
@@ -652,13 +704,15 @@ function OnlineRegistrationWizard({
     emergencyContactRelationship: "",
     emergencyContactPhone: "",
     password: "",
+    consentToTreatment: false,
     privacyAcknowledged: false,
   });
   const [residencePin, setResidencePin] = useState<PinnedLocation | null>(null);
   const [pinSource, setPinSource] = useState<
     "Current device location" | "Patient-selected pin"
   >("Patient-selected pin");
-  const [pinConfirmed, setPinConfirmed] = useState(false);
+  const [detectedResidenceAddress, setDetectedResidenceAddress] =
+    useState<DetectedPhilippineAddress | null>(null);
   const [locationStatus, setLocationStatus] = useState("");
   const [error, setError] = useState("");
   const age = calculateAge(form.dob);
@@ -690,22 +744,31 @@ function OnlineRegistrationWizard({
     );
     try {
       const details = await reverseGeocodePhilippineAddress(location);
-      setForm((current) => ({
-        ...current,
-        barangay: details.barangay || current.barangay,
-        municipality: details.municipality || current.municipality,
-        province: details.province || current.province,
-        postalCode: details.postalCode || current.postalCode,
-      }));
+      setDetectedResidenceAddress(details);
       setLocationStatus(
-        "Location details were auto-filled. Please review them.",
+        "Current location detected. SmartServe is comparing it with your registered residence.",
       );
     } catch {
+      setDetectedResidenceAddress(null);
       setLocationStatus(
-        "Your pin was saved, but please enter any missing address details manually.",
+        "Your location was captured, but its barangay could not be identified. Please try again.",
       );
     }
   };
+  const locationMatch =
+    residencePin && pinSource === "Current device location"
+      ? compareBarangayLocation(form, detectedResidenceAddress)
+      : { status: "required" as const };
+  const verifiedArea =
+    locationMatch.status === "matched" ||
+    locationMatch.status === "partial-match"
+      ? locationMatch.detected
+      : undefined;
+  const hasVerifiedArea = Boolean(verifiedArea);
+  const locationAccuracyAcceptable =
+    residencePin?.accuracy === undefined || residencePin.accuracy <= 1000;
+  const currentLocationVerified =
+    hasVerifiedArea && locationAccuracyAcceptable;
   const stepProblem = () => {
     if (step === 1 && (!form.familyName || !form.givenName || !form.dob))
       return "Enter your last name, first name, and date of birth.";
@@ -732,8 +795,20 @@ function OnlineRegistrationWizard({
       return needsGuardian
         ? "Add the required guardian information and any applicable PhilHealth details."
         : "Complete the PhilHealth details for the selected client type.";
-    if (step === 4 && (!form.privacyAcknowledged || form.password.length < 4))
-      return "Create a password with at least 4 characters and acknowledge the Privacy Notice.";
+    if (step === 4) {
+      if (
+        !form.privacyAcknowledged ||
+        !form.consentToTreatment ||
+        form.password.length < 4
+      )
+        return "Create a password, acknowledge the Privacy Notice, and confirm consent to treatment.";
+      if (!residencePin || pinSource !== "Current device location")
+        return "Use your current location to verify the barangay before continuing.";
+      if (!locationAccuracyAcceptable)
+        return "Your current location is not accurate enough. Move to a clearer area and try again.";
+      if (!hasVerifiedArea)
+        return "SmartServe could not match your current area to the registered residence. Try again after checking the address details.";
+    }
     return "";
   };
   const next = () => {
@@ -785,10 +860,22 @@ function OnlineRegistrationWizard({
         latitude: residencePin?.latitude,
         longitude: residencePin?.longitude,
         locationAccuracy: residencePin?.accuracy,
-        locationSource: residencePin ? pinSource : "Barangay fallback",
-        locationVerified: Boolean(residencePin && pinConfirmed),
+        locationSource: "Current device location",
+        locationVerified: currentLocationVerified,
         locationVerifiedAt:
-          residencePin && pinConfirmed ? new Date().toISOString() : undefined,
+          currentLocationVerified ? new Date().toISOString() : undefined,
+        mobileLocationVerifiedAt: currentLocationVerified
+          ? new Date().toISOString()
+          : undefined,
+        mobileLocationBarangay:
+          verifiedArea?.barangay,
+        mobileLocationMunicipality:
+          verifiedArea?.municipality,
+        mobileLocationProvince:
+          verifiedArea?.province,
+        mobileLocationAccuracy: residencePin?.accuracy,
+        consentToTreatment: form.consentToTreatment,
+        privacyAcknowledged: form.privacyAcknowledged,
       },
       form.password,
     );
@@ -804,7 +891,7 @@ function OnlineRegistrationWizard({
     ["Identity", "Your legal patient details"],
     ["Contact", "Contact and residence"],
     ["Coverage", "PhilHealth and guardian"],
-    ["Review", "Pin, privacy, and account"],
+    ["Verification", "Location, consent, and account"],
   ] as const;
   return (
     <div className="min-h-full bg-gradient-hero p-5 pt-12 text-primary-foreground">
@@ -824,6 +911,9 @@ function OnlineRegistrationWizard({
           <h1 className="font-display text-2xl font-bold">
             Create your patient record
           </h1>
+          <p className="mt-1 text-[11px] text-primary-foreground/75">
+            The same patient profile standard used by clinic staff.
+          </p>
         </div>
       </div>
       <div className="mb-5 grid grid-cols-4 gap-1.5">
@@ -1111,25 +1201,22 @@ function OnlineRegistrationWizard({
             <div className="rounded-2xl border border-border bg-muted/40 p-3">
               <p className="text-xs font-semibold">Residence pin</p>
               <p className="mb-2 text-[10px] text-muted-foreground">
-                Use your current location only while you are at home, or tap the
-                map to pin your residence. You may continue with barangay-level
-                information if an exact pin is unavailable.
+                To use SmartServe online services, use your current location
+                while you are at your registered residence. The detected
+                barangay must match your registration details.
               </p>
               <LocationPickerMap
                 value={residencePin}
-                onChange={(location) => {
+                allowManualPin={false}
+                onChange={(location, method) => {
                   setResidencePin(location);
-                  setPinSource("Patient-selected pin");
-                  setPinConfirmed(false);
-                  void fillLocationDetails(location);
-                }}
-                onLocationMethodChange={(method) => {
                   setPinSource(
                     method === "Current device location"
                       ? "Current device location"
                       : "Patient-selected pin",
                   );
-                  setPinConfirmed(false);
+                  setDetectedResidenceAddress(null);
+                  void fillLocationDetails(location);
                 }}
               />
               {locationStatus ? (
@@ -1137,19 +1224,41 @@ function OnlineRegistrationWizard({
                   {locationStatus}
                 </p>
               ) : null}
-              {residencePin ? (
-                <label className="mt-2 flex items-start gap-2 text-[10px] text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={pinConfirmed}
-                    onChange={(event) => setPinConfirmed(event.target.checked)}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    I confirm this pin represents my residence for disease-trend
-                    monitoring.
-                  </span>
-                </label>
+              {residencePin && !locationAccuracyAcceptable ? (
+                <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[10px] text-amber-800">
+                  GPS accuracy is ±{residencePin.accuracy} m. Move to a clearer
+                  area and try again before continuing.
+                </p>
+              ) : null}
+              {locationMatch.status === "partial-match" && currentLocationVerified ? (
+                <div className="mt-2 rounded-xl border border-primary/20 bg-primary-soft px-3 py-2 text-[10px] text-primary-foreground">
+                  SmartServe verified the available area details from your current
+                  location. The map service did not return every address level.
+                </div>
+              ) : null}
+              {locationMatch.status === "incomplete" ? (
+                <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[10px] text-amber-800">
+                  SmartServe could not identify a complete barangay,
+                  municipality, and province from your current location. Try
+                  again with a better signal.
+                </p>
+              ) : null}
+              {locationMatch.status === "mismatched" ? (
+                <div className="mt-2 rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-[10px] text-destructive">
+                  <p className="font-semibold">
+                    Current location does not match your registered address.
+                  </p>
+                  <p className="mt-1">
+                    Detected: {locationMatch.detected.barangay},{" "}
+                    {locationMatch.detected.municipality},{" "}
+                    {locationMatch.detected.province}
+                  </p>
+                </div>
+              ) : null}
+              {currentLocationVerified ? (
+                <div className="mt-2 rounded-xl border border-secondary/25 bg-secondary-soft px-3 py-2 text-[10px] text-secondary-foreground">
+                  Your registered barangay has been verified from this device.
+                </div>
               ) : null}
             </div>
             <PortalInput
@@ -1161,6 +1270,18 @@ function OnlineRegistrationWizard({
               onChange={(value) => set("password", value)}
               placeholder="At least 4 characters"
             />
+            <label className="flex items-start gap-2 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={form.consentToTreatment}
+                onChange={(event) => set("consentToTreatment", event.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                I confirm that I, or my parent/legal guardian, consent to
+                clinic treatment and authorized care processes.
+              </span>
+            </label>
             <label className="flex items-start gap-2 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
               <input
                 type="checkbox"
@@ -1218,23 +1339,237 @@ function OnlineRegistrationWizard({
   );
 }
 
+function PatientLocationVerificationScreen({
+  patient,
+  updatePatient,
+  onBack,
+  onVerified,
+}: {
+  patient: Patient;
+  updatePatient: (id: string, patch: Partial<Patient>) => void;
+  onBack: () => void;
+  onVerified: () => void;
+}) {
+  const [currentPin, setCurrentPin] = useState<PinnedLocation | null>(null);
+  const [detectedAddress, setDetectedAddress] =
+    useState<DetectedPhilippineAddress | null>(null);
+  const [lookupError, setLookupError] = useState("");
+  const [isChecking, setIsChecking] = useState(false);
+  const [fallbackConfirmed, setFallbackConfirmed] = useState(false);
+  const locationMatch = currentPin
+    ? compareBarangayLocation(patient, detectedAddress)
+    : { status: "required" as const };
+  const verifiedArea =
+    locationMatch.status === "matched" ||
+    locationMatch.status === "partial-match"
+      ? locationMatch.detected
+      : undefined;
+  const hasVerifiedArea = Boolean(verifiedArea);
+  const accuracyAcceptable =
+    currentPin?.accuracy === undefined || currentPin.accuracy <= 1000;
+  const needsFallbackConfirmation =
+    Boolean(currentPin) &&
+    (locationMatch.status === "incomplete" || Boolean(lookupError));
+  const confirmedFallback = needsFallbackConfirmation && fallbackConfirmed;
+  const canContinue =
+    Boolean(currentPin) &&
+    Boolean(accuracyAcceptable) &&
+    (hasVerifiedArea || confirmedFallback);
+  const checkCurrentLocation = async (location: PinnedLocation) => {
+    setCurrentPin(location);
+    setDetectedAddress(null);
+    setLookupError("");
+    setFallbackConfirmed(false);
+    setIsChecking(true);
+    try {
+      setDetectedAddress(await reverseGeocodePhilippineAddress(location));
+    } catch {
+      setLookupError(
+        "We could not identify the barangay from this location. Check your signal and try again.",
+      );
+    } finally {
+      setIsChecking(false);
+    }
+  };
+  const completeVerification = () => {
+    if (!currentPin || !canContinue) return;
+    updatePatient(patient.id, {
+      mobileLocationVerifiedAt: new Date().toISOString(),
+      mobileLocationBarangay: verifiedArea?.barangay || patient.barangay,
+      mobileLocationMunicipality:
+        verifiedArea?.municipality || patient.municipality,
+      mobileLocationProvince: verifiedArea?.province || patient.province,
+      mobileLocationAccuracy: currentPin.accuracy,
+      latitude: currentPin.latitude,
+      longitude: currentPin.longitude,
+      locationAccuracy: currentPin.accuracy,
+      locationSource: "Current device location",
+      locationVerified: true,
+      locationVerifiedAt: new Date().toISOString(),
+    });
+    onVerified();
+  };
+  return (
+    <div className="min-h-full bg-gradient-hero p-5 pt-12 text-primary-foreground">
+      <div className="mb-6 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="grid h-10 w-10 place-items-center rounded-xl bg-card/15 backdrop-blur"
+          aria-label="Back to home"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-foreground/70">
+            SmartServe location check
+          </p>
+          <h1 className="font-display text-2xl font-bold">
+            Verify your current barangay
+          </h1>
+        </div>
+      </div>
+      <div className="rounded-3xl bg-card p-5 text-card-foreground shadow-card">
+        <div className="rounded-2xl border border-primary/20 bg-primary-soft/60 p-3 text-sm">
+          <p className="font-semibold text-primary">Why this is required</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            SmartServe compares your device location with your registered
+            residence before you use online services. This supports reliable,
+            barangay-level disease analysis.
+          </p>
+        </div>
+        <div className="mt-4 rounded-xl bg-muted/60 p-3 text-xs">
+          <p className="font-semibold">Registered residence</p>
+          <p className="mt-1 text-muted-foreground">
+            {patient.barangay}, {patient.municipality}, {patient.province}
+          </p>
+        </div>
+        <div className="mt-4">
+          <LocationPickerMap
+            value={currentPin}
+            allowManualPin={false}
+            onChange={(location, method) => {
+              if (method === "Current device location") {
+                void checkCurrentLocation(location);
+              }
+            }}
+          />
+        </div>
+        {isChecking ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Checking your current barangay…
+          </p>
+        ) : null}
+        {lookupError ? (
+          <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+            {lookupError}
+          </p>
+        ) : null}
+        {currentPin && !accuracyAcceptable ? (
+          <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Your GPS accuracy is ±{currentPin.accuracy} m. Move to a clearer
+            area and try again for a reliable barangay match.
+          </p>
+        ) : null}
+        {locationMatch.status === "partial-match" && accuracyAcceptable ? (
+          <div className="mt-3 rounded-xl border border-primary/20 bg-primary-soft p-3 text-xs text-primary-foreground">
+            <p className="font-semibold">Current area verified</p>
+            <p className="mt-1">
+              The map service returned the available matching address details.
+              You may continue because none of them conflict with your registered
+              residence.
+            </p>
+          </div>
+        ) : null}
+        {locationMatch.status === "incomplete" ? (
+          <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            SmartServe could not determine every address level from this device
+            location. This can happen when the map provider has incomplete local
+            data.
+          </p>
+        ) : null}
+        {locationMatch.status === "mismatched" ? (
+          <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+            <p className="font-semibold">Location does not match your record.</p>
+            <p className="mt-1">
+              Detected: {locationMatch.detected.barangay},{" "}
+              {locationMatch.detected.municipality},{" "}
+              {locationMatch.detected.province}
+            </p>
+            <p className="mt-2 text-muted-foreground">
+              Try again at your residence. If your registered address is wrong,
+              ask clinic staff to review it.
+            </p>
+          </div>
+        ) : null}
+        {locationMatch.status === "matched" && accuracyAcceptable ? (
+          <div className="mt-3 rounded-xl border border-secondary/25 bg-secondary-soft p-3 text-xs text-secondary-foreground">
+            <p className="font-semibold">Barangay verified</p>
+            <p className="mt-1">
+              Your current location matches {patient.barangay},{" "}
+              {patient.municipality}.
+            </p>
+          </div>
+        ) : null}
+        {needsFallbackConfirmation && accuracyAcceptable ? (
+          <label className="mt-3 flex items-start gap-2 rounded-xl border border-primary/20 bg-primary-soft/60 p-3 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={fallbackConfirmed}
+              onChange={(event) => setFallbackConfirmed(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              I confirm that this current device location is within my registered
+              barangay: <strong>{patient.barangay}</strong>. SmartServe will save
+              this as a device-location verification with limited map detail.
+            </span>
+          </label>
+        ) : null}
+        <Button
+          type="button"
+          disabled={!canContinue || isChecking}
+          onClick={completeVerification}
+          className="mt-5 h-11 w-full rounded-xl bg-gradient-primary"
+        >
+          Continue to SmartServe services
+          <ArrowRight className="ml-2 h-4 w-4" />
+        </Button>
+        {!currentPin ? (
+          <p className="mt-2 text-center text-[10px] text-muted-foreground">
+            Tap Use current location to continue.
+          </p>
+        ) : !canContinue && accuracyAcceptable ? (
+          <p className="mt-2 text-center text-[10px] text-muted-foreground">
+            Review the detected area or confirm the current barangay to continue.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function HomeScreen({
   me,
   services,
   onBook,
   onView,
   onNotif,
-  onSignOut,
 }: {
   me: any;
   services: Service[];
   onBook: () => void;
   onView: () => void;
   onNotif: () => void;
-  onSignOut: () => void;
 }) {
-  const { appointments } = usePrototypeStore();
+  const { appointments, staffUsers, notifications } = usePrototypeStore();
   const next = appointments.find((a) => a.patientId === me.id);
+  const unreadNotificationCount = notifications.filter(
+    (notification) => notification.patientId === me.id && !notification.read,
+  ).length;
+  const doctors = staffUsers.filter(
+    (user) => user.role === "Doctor" && user.active,
+  );
   const svc = next
     ? services.find((service) => service.id === next.serviceId)
     : null;
@@ -1250,24 +1585,16 @@ function HomeScreen({
               {me.fullName.split(" ")[0]}
             </h2>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={onNotif}
-              aria-label="View notifications"
-              className="relative w-10 h-10 rounded-full bg-card/20 backdrop-blur flex items-center justify-center"
-            >
-              <Bell className="w-5 h-5" />
+          <button
+            onClick={onNotif}
+            aria-label="View notifications"
+            className="relative w-10 h-10 rounded-full bg-card/20 backdrop-blur flex items-center justify-center"
+          >
+            <Bell className="w-5 h-5" />
+            {unreadNotificationCount > 0 ? (
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-warning rounded-full" />
-            </button>
-            <button
-              onClick={onSignOut}
-              aria-label="Sign out"
-              title="Sign out"
-              className="w-10 h-10 rounded-full bg-card/20 backdrop-blur flex items-center justify-center"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
+            ) : null}
+          </button>
         </div>
       </div>
 
@@ -1333,6 +1660,34 @@ function HomeScreen({
           </button>
         </div>
 
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h3 className="font-display font-semibold">Doctor availability</h3>
+              <p className="text-[11px] text-muted-foreground">
+                Updated by the clinic. Availability is shown without personal leave details.
+              </p>
+            </div>
+            <Stethoscope className="h-5 w-5 text-primary" />
+          </div>
+          {doctors.length ? (
+            <div className="space-y-2">
+              {doctors.map((doctor) => {
+                const label = patientDoctorAvailability(doctor.doctorStatus);
+                const available = doctor.doctorStatus === "Available";
+                return (
+                  <div key={doctor.id} className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2">
+                    <p className="text-sm font-medium">{doctor.fullName}</p>
+                    <Badge className={available ? "border-0 bg-secondary-soft text-secondary" : "border-0 bg-muted text-muted-foreground"}>{label}</Badge>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="rounded-xl bg-muted/50 px-3 py-3 text-xs text-muted-foreground">No doctor availability has been published yet. You may still view services or contact the clinic for assistance.</p>
+          )}
+        </div>
+
         {/* Services preview */}
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -1391,6 +1746,12 @@ function HomeScreen({
   );
 }
 
+function patientDoctorAvailability(status?: string) {
+  if (status === "Available") return "Available for consultation";
+  if (status === "With patient") return "Currently attending patients";
+  return "Not available today";
+}
+
 function ServicesScreen({
   services,
   onBack,
@@ -1446,20 +1807,18 @@ function ServicesScreen({
 
 function ScheduleScreen({
   services,
+  patient,
   serviceId,
   date,
-  location,
   onDate,
-  onLocation,
   onBack,
   onConfirm,
 }: {
   services: Service[];
+  patient: Patient;
   serviceId: string;
   date: number;
-  location: PinnedLocation | null;
   onDate: (date: number) => void;
-  onLocation: (location: PinnedLocation | null) => void;
   onBack: () => void;
   onConfirm: () => void;
 }) {
@@ -1532,43 +1891,28 @@ function ScheduleScreen({
           5:00 PM; your queue number is assigned after clinic check-in.
         </div>
 
-        <div>
-          <div className="mb-2 flex items-end justify-between gap-2">
+        <div className="rounded-2xl border border-secondary/20 bg-secondary-soft/60 p-3">
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase text-muted-foreground">
-                Patient location
+              <p className="text-xs font-semibold uppercase text-secondary">
+                Location verified
               </p>
-              <p className="text-[10px] text-muted-foreground">
-                Required for local disease monitoring
+              <p className="mt-1 text-xs text-muted-foreground">
+                Your current device location matches your registered residence:
+                {" "}
+                {patient.barangay}, {patient.municipality}.
               </p>
             </div>
-            {location && (
-              <Badge className="border-0 bg-secondary-soft text-secondary">
-                Pinned
-              </Badge>
-            )}
+            <Badge className="border-0 bg-card text-secondary">Verified</Badge>
           </div>
-          <LocationPickerMap value={location} onChange={onLocation} />
-          {location && (
-            <p className="mt-2 text-[10px] text-muted-foreground">
-              Saved pin: {location.latitude.toFixed(5)},{" "}
-              {location.longitude.toFixed(5)}
-            </p>
-          )}
         </div>
 
         <Button
-          disabled={!location}
           onClick={onConfirm}
           className="w-full h-12 rounded-2xl bg-gradient-primary border-0 shadow-glow"
         >
           Confirm booking <ArrowRight className="w-4 h-4 ml-2" />
         </Button>
-        {!location && (
-          <p className="-mt-3 text-center text-[10px] text-warning">
-            Pin the patient location before confirming.
-          </p>
-        )}
       </div>
     </div>
   );
@@ -1578,13 +1922,13 @@ function ConfirmScreen({
   services,
   serviceId,
   date,
-  location,
+  patient,
   onDone,
 }: {
   services: Service[];
   serviceId: string;
   date: number;
-  location: PinnedLocation;
+  patient: Patient;
   onDone: () => void;
 }) {
   const svc = services.find((service) => service.id === serviceId) || {
@@ -1640,8 +1984,9 @@ function ConfirmScreen({
         <div className="flex gap-2">
           <MapPin className="w-4 h-4 text-secondary shrink-0" />
           <span>
-            Patient location saved ({location.latitude.toFixed(4)},{" "}
-            {location.longitude.toFixed(4)})
+            Residence verified: {patient.barangay}, {patient.municipality},
+            {" "}
+            {patient.province}
           </span>
         </div>
         <div className="flex gap-2">
@@ -1796,47 +2141,401 @@ function MedicalRecordsScreen({
   );
 }
 
-function NotifScreen({ onBack }: { onBack: () => void }) {
+function ProfileScreen({
+  patient,
+  updatePatient,
+  onSignOut,
+}: {
+  patient: Patient;
+  updatePatient: (id: string, patch: Partial<Patient>) => void;
+  onSignOut: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState(() => ({
+    fullName: patient.fullName || "",
+    contact: patient.contact || "",
+    email: patient.email || "",
+    addressLine: patient.addressLine || patient.address || "",
+    barangay: patient.barangay || "",
+    municipality: patient.municipality || "",
+    province: patient.province || "",
+    postalCode: patient.postalCode || "",
+    emergencyContactName: patient.emergencyContactName || "",
+    emergencyContactRelationship: patient.emergencyContactRelationship || "",
+    emergencyContactPhone: patient.emergencyContactPhone || "",
+  }));
+  const set = (field: keyof typeof form, value: string) =>
+    setForm((current) => ({ ...current, [field]: value }));
+  const cancelEditing = () => {
+    setForm({
+      fullName: patient.fullName || "",
+      contact: patient.contact || "",
+      email: patient.email || "",
+      addressLine: patient.addressLine || patient.address || "",
+      barangay: patient.barangay || "",
+      municipality: patient.municipality || "",
+      province: patient.province || "",
+      postalCode: patient.postalCode || "",
+      emergencyContactName: patient.emergencyContactName || "",
+      emergencyContactRelationship: patient.emergencyContactRelationship || "",
+      emergencyContactPhone: patient.emergencyContactPhone || "",
+    });
+    setError("");
+    setEditing(false);
+  };
+  const saveProfile = () => {
+    if (!form.fullName.trim() || !form.contact.trim()) {
+      setError("Full name and mobile number are required.");
+      return;
+    }
+    const residenceChanged =
+      form.addressLine.trim() !==
+        (patient.addressLine || patient.address || "").trim() ||
+      form.barangay.trim() !== patient.barangay.trim() ||
+      form.municipality.trim() !== patient.municipality.trim() ||
+      form.province.trim() !== (patient.province || "").trim() ||
+      form.postalCode.trim() !== (patient.postalCode || "").trim();
+    updatePatient(patient.id, {
+      fullName: form.fullName.trim(),
+      contact: form.contact.trim(),
+      email: form.email.trim(),
+      addressLine: form.addressLine.trim(),
+      address: form.addressLine.trim(),
+      barangay: form.barangay.trim(),
+      municipality: form.municipality.trim(),
+      province: form.province.trim(),
+      postalCode: form.postalCode.trim(),
+      emergencyContactName: form.emergencyContactName.trim(),
+      emergencyContactRelationship: form.emergencyContactRelationship.trim(),
+      emergencyContactPhone: form.emergencyContactPhone.trim(),
+      ...(residenceChanged
+        ? {
+            locationVerified: false,
+            locationVerifiedAt: undefined,
+            mobileLocationVerifiedAt: undefined,
+            mobileLocationBarangay: undefined,
+            mobileLocationMunicipality: undefined,
+            mobileLocationProvince: undefined,
+            mobileLocationAccuracy: undefined,
+          }
+        : {}),
+    });
+    setError("");
+    setEditing(false);
+  };
+  const patientInitials = patient.fullName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((name) => name[0])
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div className="min-h-full bg-background pb-5">
+      <div className="bg-gradient-hero px-5 pb-16 pt-12 text-primary-foreground rounded-b-[2rem]">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs text-primary-foreground/70">Patient account</p>
+            <h2 className="font-display text-xl font-bold">Me</h2>
+          </div>
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-card/20 text-sm font-bold backdrop-blur">
+            {patientInitials || "PT"}
+          </div>
+        </div>
+      </div>
+
+      <div className="-mt-10 space-y-4 px-5">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-display text-lg font-semibold">
+                {patient.fullName}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {patient.patientNumber || "Patient ID pending"}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setError("");
+                setEditing(true);
+              }}
+              className="shrink-0 rounded-xl"
+            >
+              Edit profile
+            </Button>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 text-xs">
+            <div>
+              <p className="text-muted-foreground">Age</p>
+              <p className="mt-0.5 font-medium">
+                {calculateAge(patient.dob) ?? "Not provided"}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Gender</p>
+              <p className="mt-0.5 font-medium">{patient.gender || "Not provided"}</p>
+            </div>
+          </div>
+        </div>
+
+        {editing ? (
+          <div className="rounded-2xl border border-primary/20 bg-card p-4 shadow-card">
+            <div className="mb-4">
+              <h3 className="font-display font-semibold">Edit profile</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Keep your contact and residence information current for clinic coordination.
+              </p>
+            </div>
+            <div className="space-y-3">
+              <ProfileInput label="Full name" value={form.fullName} onChange={(value) => set("fullName", value)} />
+              <ProfileInput label="Mobile number" value={form.contact} onChange={(value) => set("contact", value)} inputMode="tel" />
+              <ProfileInput label="Email address" value={form.email} onChange={(value) => set("email", value)} type="email" />
+              <ProfileInput label="Street / Purok / Sitio" value={form.addressLine} onChange={(value) => set("addressLine", value)} />
+              <div className="grid grid-cols-2 gap-3">
+                <ProfileInput label="Barangay" value={form.barangay} onChange={(value) => set("barangay", value)} />
+                <ProfileInput label="City / Municipality" value={form.municipality} onChange={(value) => set("municipality", value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <ProfileInput label="Province" value={form.province} onChange={(value) => set("province", value)} />
+                <ProfileInput label="Postal code" value={form.postalCode} onChange={(value) => set("postalCode", value)} inputMode="numeric" />
+              </div>
+              <div className="border-t border-border pt-4">
+                <p className="mb-3 text-xs font-semibold">Emergency contact</p>
+                <div className="space-y-3">
+                  <ProfileInput label="Contact name" value={form.emergencyContactName} onChange={(value) => set("emergencyContactName", value)} />
+                  <ProfileInput label="Relationship" value={form.emergencyContactRelationship} onChange={(value) => set("emergencyContactRelationship", value)} />
+                  <ProfileInput label="Mobile number" value={form.emergencyContactPhone} onChange={(value) => set("emergencyContactPhone", value)} inputMode="tel" />
+                </div>
+              </div>
+            </div>
+            {error ? <p className="mt-3 text-xs text-destructive">{error}</p> : null}
+            <div className="mt-5 flex gap-2">
+              <Button type="button" onClick={saveProfile} className="flex-1 rounded-xl bg-gradient-primary">
+                Save changes
+              </Button>
+              <Button type="button" variant="outline" onClick={cancelEditing} className="rounded-xl">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <ProfileDetails title="Contact information" icon={<Phone className="h-4 w-4" />} rows={[
+              ["Mobile", patient.contact],
+              ["Email", patient.email],
+            ]} />
+            <ProfileDetails title="Registered residence" icon={<MapPin className="h-4 w-4" />} rows={[
+              ["Street / Purok / Sitio", patient.addressLine || patient.address],
+              ["Barangay", patient.barangay],
+              ["City / Municipality", patient.municipality],
+              ["Province", patient.province],
+              ["Postal code", patient.postalCode],
+            ]} />
+            <ProfileDetails title="Emergency contact" icon={<User className="h-4 w-4" />} rows={[
+              ["Name", patient.emergencyContactName],
+              ["Relationship", patient.emergencyContactRelationship],
+              ["Mobile", patient.emergencyContactPhone],
+            ]} />
+          </div>
+        )}
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onSignOut}
+          className="h-11 w-full rounded-xl border-destructive/25 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        >
+          <LogOut className="mr-2 h-4 w-4" />
+          Sign out of this device
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ProfileInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  inputMode,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: React.HTMLInputTypeAttribute;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-medium">{label}</span>
+      <Input
+        type={type}
+        inputMode={inputMode}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 rounded-xl"
+      />
+    </label>
+  );
+}
+
+function ProfileDetails({
+  title,
+  icon,
+  rows,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  rows: Array<[string, string | undefined]>;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
+      <div className="flex items-center gap-2 text-primary">
+        {icon}
+        <h3 className="font-display text-sm font-semibold text-foreground">{title}</h3>
+      </div>
+      <dl className="mt-3 space-y-3">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex items-start justify-between gap-4 text-xs">
+            <dt className="shrink-0 text-muted-foreground">{label}</dt>
+            <dd className="text-right font-medium text-foreground">
+              {value || "Not provided"}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function NotifScreen({
+  notifications,
+  markNotificationRead,
+  onBack,
+}: {
+  notifications: PatientNotification[];
+  markNotificationRead: (id: string) => void;
+  onBack: () => void;
+}) {
+  const [selectedNotification, setSelectedNotification] =
+    useState<PatientNotification | null>(null);
+  const openNotification = (notification: PatientNotification) => {
+    setSelectedNotification(notification);
+    if (!notification.read) markNotificationRead(notification.id);
+  };
   return (
     <div>
       <ScreenHeader title="Notifications" onBack={onBack} />
       <div className="p-5 space-y-3">
-        {notifications.map((n) => (
-          <div
-            key={n.id}
-            className={cn(
-              "bg-card border rounded-2xl p-4 shadow-soft",
-              n.read ? "border-border" : "border-primary/30 bg-primary-soft/40",
-            )}
-          >
-            <div className="flex items-start gap-3">
-              <div
-                className={cn(
-                  "w-9 h-9 rounded-xl flex items-center justify-center shrink-0",
-                  n.type === "reminder" && "bg-primary-soft text-primary",
-                  n.type === "update" && "bg-secondary-soft text-secondary",
-                  n.type === "alert" && "bg-warning/20 text-warning",
-                )}
-              >
-                <Bell className="w-4 h-4" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold text-sm">{n.title}</p>
-                  <span className="text-[10px] text-muted-foreground shrink-0">
-                    {n.time}
-                  </span>
+        {notifications.length > 0 ? (
+          notifications.map((notification) => (
+            <button
+              type="button"
+              key={notification.id}
+              onClick={() => openNotification(notification)}
+              className={cn(
+                "w-full bg-card border rounded-2xl p-4 shadow-soft text-left transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                notification.read
+                  ? "border-border"
+                  : "border-primary/30 bg-primary-soft/40",
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={cn(
+                    "w-9 h-9 rounded-xl flex items-center justify-center shrink-0",
+                    notification.type === "reminder" &&
+                      "bg-primary-soft text-primary",
+                    notification.type === "update" &&
+                      "bg-secondary-soft text-secondary",
+                    notification.type === "alert" && "bg-warning/20 text-warning",
+                  )}
+                >
+                  <Bell className="w-4 h-4" />
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {n.message}
-                </p>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold text-sm">{notification.title}</p>
+                    {!notification.read ? (
+                      <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />
+                    ) : null}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Tap to view notification
+                  </p>
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    {formatNotificationTime(notification.createdAt)}
+                  </p>
+                </div>
               </div>
+            </button>
+          ))
+        ) : (
+          <div className="rounded-2xl border border-dashed border-border bg-muted/30 px-5 py-12 text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-card text-muted-foreground shadow-soft">
+              <BellOff className="h-5 w-5" />
             </div>
+            <h3 className="mt-4 font-display font-semibold">
+              No notifications yet
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Booking, check-in, and clinic updates will appear here.
+            </p>
           </div>
-        ))}
+        )}
       </div>
+      <Dialog
+        open={Boolean(selectedNotification)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedNotification(null);
+        }}
+      >
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">
+              {selectedNotification?.title}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedNotification
+                ? formatNotificationTime(selectedNotification.createdAt)
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="rounded-xl bg-muted/60 p-4 text-sm leading-6 text-foreground">
+            {selectedNotification?.message}
+          </p>
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={() => setSelectedNotification(null)}
+              className="w-full rounded-xl sm:w-auto"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+function formatNotificationTime(timestamp: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "Just now";
+  return new Intl.DateTimeFormat("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 /* ---------- shared ---------- */
@@ -1873,7 +2572,7 @@ function BottomNav({
     { id: "services", icon: Calendar, label: "Book" },
     { id: "myAppts", icon: ListChecks, label: "Queue" },
     { id: "records", icon: FileText, label: "Records" },
-    { id: "notif", icon: Bell, label: "Alerts" },
+    { id: "profile", icon: User, label: "Me" },
   ];
   return (
     <div className="absolute bottom-0 left-0 right-0 bg-card/95 backdrop-blur border-t border-border px-2 py-2 flex justify-around">

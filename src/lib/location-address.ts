@@ -26,13 +26,21 @@ export async function reverseGeocodePhilippineAddress(
     address.barangay ||
     address.village ||
     address.suburb ||
-    address.neighbourhood;
+    address.neighbourhood ||
+    address.quarter ||
+    address.hamlet ||
+    address.locality;
   const municipality =
     address.municipality ||
     address.city ||
     address.town ||
-    address.city_district;
-  const province = address.province || address.state;
+    address.city_district ||
+    address.county ||
+    address.district;
+  // OSM frequently uses `state` for a Philippine *region* (for example,
+  // Cagayan Valley), not the province. Do not treat it as a province because
+  // that creates a false mismatch with records such as Isabela.
+  const province = address.province || address.state_district;
   const postalCode = address.postcode?.trim();
 
   return {

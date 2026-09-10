@@ -28,6 +28,47 @@ import { reverseGeocodePhilippineAddress } from "@/lib/location-address";
 import { appointmentPriority, orderDoctorQueue } from "@/lib/queue-priority";
 
 type Tab = "board" | "checkin" | "intake" | "queue";
+export type QueueDisplayAppointment = Pick<
+  Appointment,
+  | "id"
+  | "queueNumber"
+  | "queueStatus"
+  | "room"
+  | "triagePriority"
+  | "queueEnteredAt"
+  | "createdAt"
+>;
+export type QueueDisplayState = {
+  appointments: QueueDisplayAppointment[];
+  updatedAt: string;
+};
+
+export const createPublicQueueSnapshot = (
+  appointments: Appointment[],
+): QueueDisplayState => ({
+  appointments: appointments
+    .filter((appointment) => Boolean(appointment.queueNumber))
+    .map(
+      ({
+        id,
+        queueNumber,
+        queueStatus,
+        room,
+        triagePriority,
+        queueEnteredAt,
+        createdAt,
+      }) => ({
+        id,
+        queueNumber,
+        queueStatus,
+        room,
+        triagePriority,
+        queueEnteredAt,
+        createdAt,
+      }),
+    ),
+  updatedAt: new Date().toISOString(),
+});
 const label = (patients: Patient[], id: string) =>
   patients.find((p) => p.id === id)?.fullName || "Unknown patient";
 const normalizePatientIdentity = (value: string) =>
@@ -73,6 +114,14 @@ export function StaffApp() {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    const payload = createPublicQueueSnapshot(store.appointments);
+    void fetch("/api/queue-display", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => undefined);
+  }, [store.appointments]);
   const tabs = [
     { id: "board" as Tab, label: "TV Queue Board", icon: MonitorPlay },
     { id: "checkin" as Tab, label: "Scheduled Check-in", icon: UserCheck },
@@ -139,7 +188,6 @@ export function StaffApp() {
           appts={store.appointments}
           patients={store.patients}
           call={store.callNext}
-          send={store.sendToDoctor}
           absent={store.markAbsent}
         />
       )}
@@ -147,7 +195,34 @@ export function StaffApp() {
   );
 }
 
-function Board({ appts, now }: { appts: Appointment[]; now: Date }) {
+const displayPriorityRank = {
+  Emergency: 0,
+  Urgent: 1,
+  Priority: 2,
+  Normal: 3,
+} as const;
+const displayQueueNumberRank = (queueNumber: string) => {
+  const value = Number.parseInt(queueNumber.replace(/\D/g, ""), 10);
+  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+};
+const orderPublicDoctorQueue = (appointments: QueueDisplayAppointment[]) =>
+  appointments
+    .filter((appointment) => appointment.queueStatus === "Waiting for Doctor")
+    .toSorted((left, right) => {
+      const priorityDifference =
+        displayPriorityRank[left.triagePriority || "Normal"] -
+        displayPriorityRank[right.triagePriority || "Normal"];
+      if (priorityDifference) return priorityDifference;
+      return displayQueueNumberRank(left.queueNumber) - displayQueueNumberRank(right.queueNumber);
+    });
+
+function Board({
+  appts,
+  now,
+}: {
+  appts: QueueDisplayAppointment[];
+  now: Date;
+}) {
   const called = appts.filter(
     (appointment) => appointment.queueStatus === "Called",
   );
@@ -158,7 +233,7 @@ function Board({ appts, now }: { appts: Appointment[]; now: Date }) {
         numeric: true,
       }),
     );
-  const upNext = [...orderDoctorQueue(appts), ...triageWaiting];
+  const upNext = [...orderPublicDoctorQueue(appts), ...triageWaiting];
 
   return (
     <div className="tv-frame max-w-[1200px]">
@@ -231,6 +306,61 @@ function Board({ appts, now }: { appts: Appointment[]; now: Date }) {
         </p>
       </div>
     </div>
+  );
+}
+
+export function QueueTvDisplay() {
+  const [now, setNow] = useState(new Date());
+  const [queue, setQueue] = useState<QueueDisplayState>({
+    appointments: [],
+    updatedAt: "",
+  });
+  const [connection, setConnection] = useState("Connecting to the local SmartServe queue…");
+
+  useEffect(() => {
+    const clock = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(clock);
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const response = await fetch("/api/queue-display", {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error("Queue display is unavailable");
+        const state = (await response.json()) as QueueDisplayState;
+        if (!active) return;
+        setQueue({
+          appointments: Array.isArray(state.appointments)
+            ? state.appointments
+            : [],
+          updatedAt: state.updatedAt || "",
+        });
+        setConnection(
+          state.updatedAt
+            ? `Live local queue · last staff update ${new Date(state.updatedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+            : "Waiting for the staff queue workspace to publish the first update.",
+        );
+      } catch {
+        if (active)
+          setConnection("Waiting for the local SmartServe server. Keep this TV on the same clinic network.");
+      }
+    };
+    void refresh();
+    const poll = window.setInterval(() => void refresh(), 2500);
+    return () => {
+      active = false;
+      window.clearInterval(poll);
+    };
+  }, []);
+
+  return (
+    <main className="min-h-screen bg-slate-950 p-3 md:p-6">
+      <Board appts={queue.appointments} now={now} />
+      <p className="mt-3 text-center text-xs text-slate-400">{connection}</p>
+    </main>
   );
 }
 
@@ -706,10 +836,11 @@ function RegistrationForm({ onRegistered }: { onRegistered: () => void }) {
         Manual patient registration
       </h3>
       <p className="text-sm text-muted-foreground mb-5">
-        Complete this with the patient. Search and confirm an exact residence
-        location whenever possible. Once the barangay, municipality, and
-        province are entered, the system automatically finds an estimated
-        location for staff to review and adjust.
+        This uses the same patient-profile standard as online registration.
+        Complete it with the patient, then search and confirm the residence
+        location. Once the barangay, municipality, and province are entered,
+        the system automatically finds an estimated barangay reference pin for
+        staff to review and adjust.
       </p>
       <div className="mb-5 rounded-xl border border-primary/20 bg-primary-soft/60 px-4 py-3 text-sm text-primary">
         A permanent SmartServe patient ID is created on save. Future walk-ins,
@@ -1353,9 +1484,11 @@ function TriageForm() {
   );
 }
 
-function Queue({ appts, patients, call, send, absent }: any) {
+function Queue({ appts, patients, call, absent }: any) {
   const waiting = orderDoctorQueue(appts);
-  const current = appts.find((a: Appointment) => a.queueStatus === "Called");
+  const current =
+    appts.find((a: Appointment) => a.queueStatus === "Called") ||
+    appts.find((a: Appointment) => a.queueStatus === "In Consultation");
   const next = waiting[0];
   const priorityTone: Record<string, string> = {
     Emergency: "bg-red-100 text-red-700",
@@ -1367,7 +1500,7 @@ function Queue({ appts, patients, call, send, absent }: any) {
     <div className="grid md:grid-cols-3 gap-4 max-w-5xl mx-auto">
       <div className="md:col-span-2 space-y-4">
         <div className="bg-gradient-primary text-primary-foreground rounded-2xl p-6">
-          <p className="text-xs uppercase opacity-80">Currently called</p>
+          <p className="text-xs uppercase opacity-80">Now serving</p>
           <p className="font-display font-extrabold text-5xl my-1">
             {current?.queueNumber || "—"}
           </p>
@@ -1386,15 +1519,8 @@ function Queue({ appts, patients, call, send, absent }: any) {
               <Phone className="w-4 h-4 mr-2" />
               Call next
             </Button>
-            {current && (
+            {current?.queueStatus === "Called" ? (
               <>
-                <Button
-                  variant="outline"
-                  className="border-primary-foreground/30 text-primary-foreground"
-                  onClick={() => send(current.id)}
-                >
-                  Arrived at doctor
-                </Button>
                 <Button
                   variant="outline"
                   className="border-primary-foreground/30 text-primary-foreground"
@@ -1403,12 +1529,12 @@ function Queue({ appts, patients, call, send, absent }: any) {
                   No show
                 </Button>
               </>
-            )}
+            ) : null}
           </div>
         </div>
         <div className="bg-card border border-border rounded-2xl overflow-hidden">
           <div className="p-4 border-b border-border">
-            <h3 className="font-display font-bold">Ready for doctor</h3>
+            <h3 className="font-display font-bold">Waiting to be called</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Urgent → Priority → Normal. Patients within the same level retain
               queue-number order.

@@ -1,19 +1,27 @@
-import { useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
   Calendar,
+  Cast,
   ClipboardPlus,
+  Copy,
   DatabaseZap,
   Download,
   Eye,
+  KeyRound,
   LayoutDashboard,
   MapPin,
   Package,
   Pencil,
   Plus,
+  Radio,
+  RefreshCw,
   Settings,
+  ShieldCheck,
   Stethoscope,
   Trash2,
   TrendingUp,
+  Tv,
+  Unplug,
   Upload,
   UserCog,
   UserPlus,
@@ -26,6 +34,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -57,9 +66,13 @@ import {
 import { DiseaseTrendMap } from "@/components/DiseaseTrendMap";
 import {
   usePrototypeStore,
+  type AuditEvent,
   type ConsultationTemplate,
+  type DoctorAvailability,
   type ImportSummary,
   type MigrationRow,
+  type StaffRole,
+  type StaffUser,
 } from "@/lib/prototype-store";
 
 type Page =
@@ -70,7 +83,8 @@ type Page =
   | "consultationTemplates"
   | "trends"
   | "inventory"
-  | "users";
+  | "users"
+  | "cast";
 const nav: [Page, string, any][] = [
   ["overview", "Overview", LayoutDashboard],
   ["appointments", "Appointments", Calendar],
@@ -80,6 +94,7 @@ const nav: [Page, string, any][] = [
   ["trends", "Disease Trends", TrendingUp],
   ["inventory", "Inventory", Package],
   ["users", "Staff & Roles", UserCog],
+  ["cast", "Cast Center", Cast],
 ];
 export function AdminApp() {
   const [page, setPage] = useState<Page>("overview");
@@ -241,10 +256,12 @@ function PageContent({ page, store }: any) {
         remove={store.deleteStaffUser}
       />
     );
+  if (page === "cast") return <CastCenter />;
   if (page === "inventory")
     return (
       <MedicinePage
         medicines={medicines}
+        audit={audit}
         add={store.addMedicine}
         update={store.updateMedicine}
         remove={store.deleteMedicine}
@@ -290,6 +307,57 @@ function PageContent({ page, store }: any) {
     </>
   );
 }
+type DiagnosisSummary = {
+  name: string;
+  code: string;
+  value: number;
+  color: string;
+};
+
+const diagnosisColors = [
+  "#0ea5e9",
+  "#14b8a6",
+  "#8b5cf6",
+  "#f97316",
+  "#ec4899",
+  "#64748b",
+];
+const diagnosisAcronym = (diagnosis: string) => {
+  const normalized = diagnosis.trim().toLowerCase();
+  const known: Record<string, string> = {
+    "acute upper respiratory infection": "AURI",
+    tuberculosis: "TB",
+    "dengue fever": "DF",
+    hypertension: "HTN",
+    diabetes: "DM",
+    "urinary tract infection": "UTI",
+    "animal bite": "AB",
+  };
+  if (known[normalized]) return known[normalized];
+  const letters = diagnosis
+    .match(/[A-Za-z0-9]+/g)
+    ?.map((word) => word[0])
+    .join("")
+    .toUpperCase();
+  return letters?.slice(0, 5) || "N/A";
+};
+
+function DiagnosisChartTooltip({ active, payload }: any) {
+  const item = payload?.[0]?.payload as DiagnosisSummary | undefined;
+  if (!active || !item) return null;
+  return (
+    <div className="rounded-xl border border-border bg-card px-3 py-2 shadow-card">
+      <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-primary">
+        {item.code}
+      </p>
+      <p className="mt-1 max-w-56 text-sm font-semibold">{item.name}</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {item.value} recorded case{item.value === 1 ? "" : "s"}
+      </p>
+    </div>
+  );
+}
+
 function OverviewDashboard({ store }: any) {
   const {
     patients,
@@ -306,6 +374,8 @@ function OverviewDashboard({ store }: any) {
   const [serviceId, setServiceId] = useState("all");
   const [status, setStatus] = useState("all");
   const [importOpen, setImportOpen] = useState(false);
+  const [selectedDiagnosis, setSelectedDiagnosis] =
+    useState<DiagnosisSummary | null>(null);
   const filteredAppointments = useMemo(
     () =>
       appointments.filter((appointment: any) => {
@@ -370,7 +440,7 @@ function OverviewDashboard({ store }: any) {
           { name: "Cancelled", value: 0 },
         ];
   }, [filteredAppointments]);
-  const diagnosisData = useMemo(() => {
+  const diagnosisData = useMemo<DiagnosisSummary[]>(() => {
     const results = Object.entries(
       filteredRecords.reduce((counts: Record<string, number>, record: any) => {
         const label = record.diagnosis?.trim() || "No diagnosis recorded";
@@ -378,10 +448,29 @@ function OverviewDashboard({ store }: any) {
         return counts;
       }, {}),
     )
-      .map(([name, value]) => ({ name, value }))
+      .map(([name, value]) => ({ name, value: Number(value) }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 6);
-    return results.length ? results : [{ name: "No cases recorded", value: 0 }];
+    if (!results.length)
+      return [
+        {
+          name: "No cases recorded",
+          code: "NCR",
+          value: 0,
+          color: diagnosisColors[0],
+        },
+      ];
+    const usedCodes = new Map<string, number>();
+    return results.map((item, index) => {
+      const baseCode = diagnosisAcronym(item.name);
+      const duplicateCount = usedCodes.get(baseCode) || 0;
+      usedCodes.set(baseCode, duplicateCount + 1);
+      return {
+        ...item,
+        code: duplicateCount ? `${baseCode}-${duplicateCount + 1}` : baseCode,
+        color: diagnosisColors[index % diagnosisColors.length],
+      };
+    });
   }, [filteredRecords]);
   const present = filteredAppointments.filter(
     (appointment: any) => appointment.attendanceStatus === "Present",
@@ -400,10 +489,7 @@ function OverviewDashboard({ store }: any) {
   const lowStock = medicines.filter(
     (medicine: any) => medicine.stock <= medicine.reorderLevel,
   ).length;
-  const availableStaff = staffUsers.filter(
-    (user: any) =>
-      user.active && (user.availability || "Available") === "Available",
-  ).length;
+  const activeAccounts = staffUsers.filter((user: StaffUser) => user.active).length;
   const statuses = [
     ...new Set(
       appointments
@@ -549,7 +635,7 @@ function OverviewDashboard({ store }: any) {
           />
         </div>
       </section>
-      <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Kpi
           label="Filtered appointments"
           value={filteredAppointments.length}
@@ -558,7 +644,7 @@ function OverviewDashboard({ store }: any) {
         <Kpi label="Completed checkups" value={filteredRecords.length} />
         <Kpi label="Currently in queue" value={waiting} />
         <Kpi label="Low-stock medicines" value={lowStock} />
-        <Kpi label="Available staff" value={availableStaff} />
+        <Kpi label="Active staff accounts" value={activeAccounts} />
       </div>
       <div className="mb-5 grid gap-5 xl:grid-cols-[1.55fr,1fr]">
         <DashboardCard
@@ -702,45 +788,59 @@ function OverviewDashboard({ store }: any) {
       <div className="grid gap-5 xl:grid-cols-[1.1fr,.9fr]">
         <DashboardCard
           title="Cases by diagnosis"
-          sub="Top recorded diagnoses from completed checkups."
+          sub="Top disease trends from completed checkups. Click a bar to read the full diagnosis."
         >
-          <ResponsiveContainer width="100%" height={260}>
+          <div className="mb-4 flex flex-wrap gap-2" aria-label="Disease acronym key">
+            {diagnosisData.map((item) => (
+              <button
+                type="button"
+                key={item.code}
+                onClick={() => item.value > 0 && setSelectedDiagnosis(item)}
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-semibold transition-colors hover:border-primary/40 hover:bg-primary-soft"
+                title={item.name}
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: item.color }}
+                />
+                {item.code}
+              </button>
+            ))}
+          </div>
+          <ResponsiveContainer width="100%" height={254}>
             <BarChart
               data={diagnosisData}
-              margin={{ left: -18, right: 12, top: 8, bottom: 48 }}
+              margin={{ left: -18, right: 12, top: 12, bottom: 0 }}
             >
-              <defs>
-                <linearGradient id="caseBarFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--accent))" />
-                  <stop offset="100%" stopColor="hsl(var(--primary))" />
-                </linearGradient>
-              </defs>
               <CartesianGrid vertical={false} strokeDasharray="3 3" />
               <XAxis
-                dataKey="name"
+                dataKey="code"
                 tickLine={false}
                 axisLine={false}
-                interval={0}
-                angle={-20}
-                textAnchor="end"
-                height={60}
+                tick={{ fontSize: 11, fontWeight: 700 }}
               />
               <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
-              <Tooltip
-                cursor={{ fill: "hsl(var(--muted))" }}
-                contentStyle={{
-                  borderRadius: 12,
-                  borderColor: "hsl(var(--border))",
-                }}
-              />
+              <Tooltip cursor={{ fill: "hsl(var(--muted))" }} content={<DiagnosisChartTooltip />} />
               <Bar
                 dataKey="value"
                 name="Cases"
-                fill="url(#caseBarFill)"
-                radius={[6, 6, 0, 0]}
-              />
+                radius={[8, 8, 2, 2]}
+                cursor="pointer"
+                onClick={(entry: any) => {
+                  const selected = entry?.payload || entry;
+                  if (selected?.value > 0) setSelectedDiagnosis(selected);
+                }}
+              >
+                {diagnosisData.map((item) => (
+                  <Cell key={item.code} fill={item.color} />
+                ))}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            Acronyms keep the chart readable. Select a bar or acronym to view
+            the full disease trend.
+          </p>
         </DashboardCard>
         <DashboardCard
           title="Operational attention"
@@ -758,8 +858,8 @@ function OverviewDashboard({ store }: any) {
               tone={waiting ? "text-amber-600" : "text-primary"}
             />
             <Attention
-              label="Staff currently available"
-              value={availableStaff}
+              label="Active staff accounts"
+              value={activeAccounts}
               tone="text-primary"
             />
             <Attention
@@ -775,6 +875,48 @@ function OverviewDashboard({ store }: any) {
         onOpenChange={setImportOpen}
         onImport={store.importMigration}
       />
+      <Dialog
+        open={Boolean(selectedDiagnosis)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedDiagnosis(null);
+        }}
+      >
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogDescription>Selected disease trend</DialogDescription>
+            <DialogTitle className="font-display text-2xl">
+              {selectedDiagnosis?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-primary-soft p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-primary">
+                Acronym
+              </p>
+              <p className="mt-1 font-display text-2xl font-bold">
+                {selectedDiagnosis?.code}
+              </p>
+            </div>
+            <div className="rounded-xl bg-muted p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground">
+                Filtered cases
+              </p>
+              <p className="mt-1 font-display text-2xl font-bold">
+                {selectedDiagnosis?.value ?? 0}
+              </p>
+            </div>
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground">
+            This total reflects completed consultation records within the active
+            overview date filter. No patient names are shown in this summary.
+          </p>
+          <DialogFooter>
+            <Button type="button" onClick={() => setSelectedDiagnosis(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -2475,205 +2617,713 @@ function ConsultationTemplateFields({
   );
 }
 
-function StaffPage({ users, add, update, remove }: any) {
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    fullName: "",
-    username: "",
-    role: "Front desk",
-    active: true,
-    availability: "Available",
-    availabilityNote: "",
-  });
-  const create = () => {
-    if (add(form)) {
-      setForm({
-        fullName: "",
-        username: "",
-        role: "Front desk",
-        active: true,
-        availability: "Available",
-        availabilityNote: "",
-      });
-      setOpen(false);
-    }
+type AccountDialog = "staff" | "doctor" | "admin" | "edit" | "reset" | null;
+type AccountForm = {
+  fullName: string;
+  username: string;
+  password: string;
+  confirmPassword: string;
+  active: boolean;
+  doctorStatus: DoctorAvailability;
+  recoveryEmail: string;
+  mobile: string;
+  title: string;
+  notes: string;
+};
+
+const blankAccountForm = (): AccountForm => ({
+  fullName: "",
+  username: "",
+  password: "",
+  confirmPassword: "",
+  active: true,
+  doctorStatus: "Available",
+  recoveryEmail: "",
+  mobile: "",
+  title: "Clinic Administrator",
+  notes: "",
+});
+const staffRoles: StaffRole[] = ["Front desk", "Nurse / Triage", "Pharmacy"];
+const doctorStatuses: DoctorAvailability[] = [
+  "Available",
+  "With patient",
+  "On break",
+  "Off duty",
+  "On leave",
+];
+
+function StaffPage({
+  users,
+  add,
+  update,
+  remove,
+}: {
+  users: StaffUser[];
+  add: (user: Omit<StaffUser, "id">) => boolean;
+  update: (id: string, patch: Partial<StaffUser>) => boolean;
+  remove: (id: string) => void;
+}) {
+  const [dialog, setDialog] = useState<AccountDialog>(null);
+  const [selected, setSelected] = useState<StaffUser | null>(null);
+  const [form, setForm] = useState<AccountForm>(blankAccountForm);
+  const [createRole, setCreateRole] = useState<StaffRole>("Front desk");
+  const [error, setError] = useState("");
+  const isDoctor = dialog === "doctor" || (dialog === "edit" && selected?.role === "Doctor");
+  const isAdmin = dialog === "admin" || (dialog === "edit" && selected?.role === "Administrator");
+
+  const close = () => {
+    setDialog(null);
+    setSelected(null);
+    setForm(blankAccountForm());
+    setError("");
   };
+  const openCreate = (kind: Extract<AccountDialog, "staff" | "doctor" | "admin">) => {
+    setDialog(kind);
+    setSelected(null);
+    setForm(blankAccountForm());
+    setCreateRole("Front desk");
+    setError("");
+  };
+  const openEdit = (user: StaffUser) => {
+    setSelected(user);
+    setDialog("edit");
+    setForm({
+      fullName: user.fullName,
+      username: user.username,
+      password: "",
+      confirmPassword: "",
+      active: user.active,
+      doctorStatus: user.doctorStatus || "Available",
+      recoveryEmail: user.recoveryEmail || "",
+      mobile: user.mobile || "",
+      title: user.title || "Clinic Administrator",
+      notes: user.notes || "",
+    });
+    setError("");
+  };
+  const openReset = (user: StaffUser) => {
+    setSelected(user);
+    setDialog("reset");
+    setForm(blankAccountForm());
+    setError("");
+  };
+  const save = () => {
+    if (dialog === "reset") {
+      if (!selected || form.password.length < 4 || form.password !== form.confirmPassword) {
+        setError("Use a temporary password of at least 4 characters and confirm it exactly.");
+        return;
+      }
+      update(selected.id, { password: form.password, passwordChangeRequired: true });
+      close();
+      return;
+    }
+    if (!form.fullName.trim() || !form.username.trim()) {
+      setError("Enter the account holder’s name and a username.");
+      return;
+    }
+    if (dialog === "edit" && selected) {
+      const updated = update(selected.id, {
+        fullName: form.fullName,
+        username: form.username,
+        active: form.active,
+        doctorStatus: selected.role === "Doctor" ? form.doctorStatus : undefined,
+        recoveryEmail: selected.role === "Administrator" ? form.recoveryEmail : undefined,
+        mobile: selected.role === "Administrator" ? form.mobile : undefined,
+        title: selected.role === "Administrator" ? form.title : undefined,
+        notes: selected.role === "Administrator" ? form.notes : undefined,
+      });
+      if (!updated) {
+        setError("That username is already in use. Choose another username.");
+        return;
+      }
+      close();
+      return;
+    }
+    if (form.password.length < 4 || form.password !== form.confirmPassword) {
+      setError("Use a temporary password of at least 4 characters and confirm it exactly.");
+      return;
+    }
+    const role: StaffRole =
+      dialog === "doctor" ? "Doctor" : dialog === "admin" ? "Administrator" : createRole;
+    const created = add({
+      fullName: form.fullName,
+      username: form.username,
+      password: form.password,
+      role,
+      active: form.active,
+      passwordChangeRequired: true,
+      doctorStatus: role === "Doctor" ? form.doctorStatus : undefined,
+      recoveryEmail: role === "Administrator" ? form.recoveryEmail : undefined,
+      mobile: role === "Administrator" ? form.mobile : undefined,
+      title: role === "Administrator" ? form.title : undefined,
+      notes: role === "Administrator" ? form.notes : undefined,
+    });
+    if (!created) {
+      setError("That username is already in use. Choose another username.");
+      return;
+    }
+    close();
+  };
+  const dialogTitle =
+    dialog === "staff"
+      ? "Create staff account"
+      : dialog === "doctor"
+        ? "Create doctor account"
+        : dialog === "admin"
+          ? "Set up administrator"
+          : dialog === "reset"
+            ? `Reset temporary password${selected ? ` · ${selected.fullName}` : ""}`
+            : `Edit account${selected ? ` · ${selected.fullName}` : ""}`;
+  const dialogDescription =
+    dialog === "admin"
+      ? "Administrator accounts include recovery details. Passwords are never shown again after you save."
+      : dialog === "doctor"
+        ? "Only doctor accounts have an availability status that patients can view before booking."
+        : dialog === "reset"
+          ? "Set a new temporary password. The user must change it at first sign-in in the production version."
+          : "Local prototype credentials route this user to the workspace assigned to their role.";
+
   return (
     <>
       <Head
         title="Staff & roles"
-        sub="Create users and maintain their current work availability."
+        sub="Simple role-based login accounts. Only doctors publish an availability status to patients."
         action={
-          <Button onClick={() => setOpen(true)}>
-            <UserPlus className="w-4 h-4 mr-2" />
-            Create staff user
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="icon" variant="outline" onClick={() => openCreate("staff")} title="Create staff account" aria-label="Create staff account">
+              <UserPlus className="h-4 w-4" />
+            </Button>
+            <Button size="icon" variant="outline" onClick={() => openCreate("doctor")} title="Create doctor account" aria-label="Create doctor account">
+              <Stethoscope className="h-4 w-4" />
+            </Button>
+            <Button size="icon" onClick={() => openCreate("admin")} title="Set up administrator" aria-label="Set up administrator">
+              <ShieldCheck className="h-4 w-4" />
+            </Button>
+          </div>
         }
       />
-      <Panel title="Staff directory">
-        {users.map((u: any) => (
-          <Row
-            key={u.id}
-            title={u.fullName}
-            detail={`@${u.username} · ${u.active ? "Account active" : "Account inactive"} · ${u.availability || "Available"}${u.availabilityNote ? ` · ${u.availabilityNote}` : ""}`}
-            badge={`${u.role} · ${u.availability || "Available"}`}
-            actions={
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    const availability = window.prompt(
-                      "Availability: Available, On leave, In travel, Off duty, Unavailable",
-                      u.availability || "Available",
-                    );
-                    if (availability)
-                      update(u.id, {
-                        availability,
-                        availabilityNote:
-                          window.prompt(
-                            "Availability note / return date",
-                            u.availabilityNote || "",
-                          ) || "",
-                      });
-                  }}
-                >
-                  Set status
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => update(u.id, { active: !u.active })}
-                >
-                  {u.active ? "Deactivate" : "Activate"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() =>
-                    window.confirm(`Delete ${u.fullName}?`) && remove(u.id)
-                  }
-                >
-                  Delete
-                </Button>
-              </>
-            }
-          />
-        ))}
-        {!users.length && (
-          <Empty text="No staff users yet. Use Create staff user to add the first role." />
-        )}
-      </Panel>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-xl rounded-2xl p-0">
-          <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5">
-            <DialogTitle className="flex items-center gap-2 font-display text-2xl">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-soft">
-                <UserPlus className="w-5 h-5 text-primary" />
-              </span>
-              Create staff user
-            </DialogTitle>
-            <DialogDescription>
-              Set the staff member’s role and current availability for this
-              local prototype.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 px-6 py-5">
-            <Field
-              label="Full name"
-              value={form.fullName}
-              onChange={(v: string) => setForm({ ...form, fullName: v })}
-            />
-            <Field
-              label="Username"
-              value={form.username}
-              onChange={(v: string) => setForm({ ...form, username: v })}
-            />
-            <div>
-              <Label>Role</Label>
-              <select
-                value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value })}
-                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {[
-                  "Front desk",
-                  "Nurse / Triage",
-                  "Doctor",
-                  "Pharmacy",
-                  "Administrator",
-                ].map((role) => (
-                  <option key={role}>{role}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label>Current availability</Label>
-              <select
-                value={form.availability}
-                onChange={(e) =>
-                  setForm({ ...form, availability: e.target.value })
-                }
-                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {[
-                  "Available",
-                  "On leave",
-                  "In travel",
-                  "Off duty",
-                  "Unavailable",
-                ].map((status) => (
-                  <option key={status}>{status}</option>
-                ))}
-              </select>
-            </div>
-            <Field
-              label="Availability note / return date (optional)"
-              value={form.availabilityNote}
-              onChange={(v: string) =>
-                setForm({ ...form, availabilityNote: v })
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
+          <p className="text-xs font-semibold text-primary">Staff accounts</p>
+          <p className="mt-1 text-xs text-muted-foreground">Name, role, username, and temporary password.</p>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
+          <p className="text-xs font-semibold text-primary">Doctor accounts</p>
+          <p className="mt-1 text-xs text-muted-foreground">A patient-visible care availability status is included.</p>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
+          <p className="text-xs font-semibold text-primary">Administrator accounts</p>
+          <p className="mt-1 text-xs text-muted-foreground">Adds recovery and internal contact details for secure setup.</p>
+        </div>
+      </div>
+      <Panel title="Account directory">
+        {users.map((user) => {
+          const detail = [
+            `@${user.username}`,
+            user.active ? "Account active" : "Account disabled",
+            user.role === "Doctor" ? `Patient view: ${doctorAvailabilityLabel(user.doctorStatus)}` : "",
+            user.role === "Administrator" && user.recoveryEmail ? user.recoveryEmail : "",
+          ].filter(Boolean).join(" · ");
+          return (
+            <Row
+              key={user.id}
+              title={user.fullName}
+              detail={detail}
+              badge={user.role}
+              actions={
+                <>
+                  <Button size="icon" variant="outline" onClick={() => openEdit(user)} title="Edit account" aria-label={`Edit ${user.fullName}`}>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button size="icon" variant="outline" onClick={() => openReset(user)} title="Reset temporary password" aria-label={`Reset password for ${user.fullName}`}>
+                    <KeyRound className="h-4 w-4" />
+                  </Button>
+                  <Button size="icon" variant="outline" onClick={() => update(user.id, { active: !user.active })} title={user.active ? "Disable account" : "Enable account"} aria-label={user.active ? `Disable ${user.fullName}` : `Enable ${user.fullName}`}>
+                    <ShieldCheck className={`h-4 w-4 ${user.active ? "text-secondary" : "text-muted-foreground"}`} />
+                  </Button>
+                  <Button size="icon" variant="destructive" onClick={() => window.confirm(`Delete ${user.fullName}? This removes their local login.`) && remove(user.id)} title="Delete account" aria-label={`Delete ${user.fullName}`}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </>
               }
             />
+          );
+        })}
+        {!users.length ? <Empty text="No login accounts yet. Select an icon above to create staff, doctor, or administrator access." /> : null}
+      </Panel>
+      <Dialog open={dialog !== null} onOpenChange={(open) => !open && close()}>
+        <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto rounded-2xl p-0">
+          <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5 pr-14">
+            <DialogTitle className="flex items-center gap-2 font-display text-2xl">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-soft">
+                {dialog === "admin" ? <ShieldCheck className="h-5 w-5 text-primary" /> : dialog === "doctor" ? <Stethoscope className="h-5 w-5 text-primary" /> : <UserPlus className="h-5 w-5 text-primary" />}
+              </span>
+              {dialogTitle}
+            </DialogTitle>
+            <DialogDescription>{dialogDescription}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 px-6 py-5">
+            {dialog === "reset" ? null : (
+              <>
+                <Field label="Full name" value={form.fullName} onChange={(fullName: string) => setForm({ ...form, fullName })} />
+                <Field label="Username" value={form.username} onChange={(username: string) => setForm({ ...form, username })} />
+                {dialog === "staff" ? (
+                  <div>
+                    <Label htmlFor="staff-role">Role</Label>
+                    <select id="staff-role" value={createRole} onChange={(event) => setCreateRole(event.target.value as StaffRole)} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                      {staffRoles.map((role) => <option key={role} value={role}>{role}</option>)}
+                    </select>
+                  </div>
+                ) : null}
+                {isDoctor ? (
+                  <div>
+                    <Label htmlFor="doctor-status">Doctor availability</Label>
+                    <select id="doctor-status" value={form.doctorStatus} onChange={(event) => setForm({ ...form, doctorStatus: event.target.value as DoctorAvailability })} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                      {doctorStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                    </select>
+                    <p className="mt-1 text-xs text-muted-foreground">Patients see a privacy-safe availability message, not leave reasons.</p>
+                  </div>
+                ) : null}
+                {isAdmin ? (
+                  <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+                    <Field label="Title / position" value={form.title} onChange={(title: string) => setForm({ ...form, title })} />
+                    <Field label="Recovery email" value={form.recoveryEmail} onChange={(recoveryEmail: string) => setForm({ ...form, recoveryEmail })} />
+                    <Field label="Mobile number" value={form.mobile} onChange={(mobile: string) => setForm({ ...form, mobile })} />
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="admin-notes">Internal setup notes</Label>
+                      <Textarea id="admin-notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className="mt-1 min-h-20" placeholder="Optional: scope, turnover note, or recovery instruction" />
+                    </div>
+                  </div>
+                ) : null}
+                <label className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 text-sm">
+                  <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
+                  Account is active and can sign in
+                </label>
+              </>
+            )}
+            {(dialog !== "edit" || dialog === "reset") ? (
+              <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="temporary-password">Temporary password</Label>
+                  <Input id="temporary-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="mt-1" autoComplete="new-password" />
+                </div>
+                <div>
+                  <Label htmlFor="confirm-temporary-password">Confirm temporary password</Label>
+                  <Input id="confirm-temporary-password" type="password" value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })} className="mt-1" autoComplete="new-password" />
+                </div>
+              </div>
+            ) : null}
+            {error ? <p role="alert" className="rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
           </div>
           <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={create}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create user
-            </Button>
+            <Button variant="outline" onClick={close}>Cancel</Button>
+            <Button onClick={save}><KeyRound className="mr-2 h-4 w-4" />{dialog === "edit" ? "Save account" : dialog === "reset" ? "Save temporary password" : "Create account"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
   );
 }
-function MedicinePage({ medicines, add, update, remove }: any) {
+
+function doctorAvailabilityLabel(status?: DoctorAvailability) {
+  if (status === "Available") return "Available for consultation";
+  if (status === "With patient") return "Currently attending patients";
+  return "Not available today";
+}
+
+type CastTarget = {
+  id: string;
+  label: string;
+  description: string;
+  visibility: "Public-safe" | "Private clinical";
+};
+
+const castTargets: CastTarget[] = [
+  {
+    id: "queue-tv",
+    label: "Queue Board",
+    description: "TV board that shows queue numbers only.",
+    visibility: "Public-safe",
+  },
+  {
+    id: "patient-mobile",
+    label: "Patient Portal",
+    description: "Patient sign-in and online-services experience.",
+    visibility: "Private clinical",
+  },
+  {
+    id: "staff-queue",
+    label: "Front Desk & Queue",
+    description: "Check-in, onsite intake, triage, and queue control.",
+    visibility: "Private clinical",
+  },
+  {
+    id: "doctor-consultation",
+    label: "Doctor Consultation",
+    description: "Clinical notes, diagnoses, and medicine selection.",
+    visibility: "Private clinical",
+  },
+  {
+    id: "pharmacy-inventory",
+    label: "Pharmacy Inventory",
+    description: "Medicine stock and dispensing workspace.",
+    visibility: "Private clinical",
+  },
+  {
+    id: "admin-dashboard",
+    label: "Admin Dashboard",
+    description: "Administrative reports and protected clinic records.",
+    visibility: "Private clinical",
+  },
+  {
+    id: "disease-trends",
+    label: "Disease Trends",
+    description: "Aggregated disease-monitoring visualization.",
+    visibility: "Private clinical",
+  },
+];
+
+type LanCastDevice = {
+  id: string;
+  displayName: string;
+  model: string;
+  address: string;
+  port: number;
+  host: string;
+};
+type CastDiscoveryResponse = {
+  devices: LanCastDevice[];
+  scannedAt: string;
+  hint: string;
+};
+type ActiveCast = {
+  workspaceId: string;
+  workspaceLabel: string;
+  deviceName: string;
+  startedAt: string;
+};
+
+function CastCenter() {
+  const [selectedId, setSelectedId] = useState("queue-tv");
+  const [privateDisplayConfirmed, setPrivateDisplayConfirmed] = useState(false);
+  const [status, setStatus] = useState("Choose a workspace, then open the Chromecast device picker.");
+  const [devices, setDevices] = useState<LanCastDevice[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [discoveryMessage, setDiscoveryMessage] = useState("Scanning the local network for Chromecast devices…");
+  const [isScanning, setIsScanning] = useState(true);
+  const [activeCast, setActiveCast] = useState<ActiveCast | null>(null);
+  const [smartTvUrls, setSmartTvUrls] = useState<string[]>([]);
+  const [smartTvMessage, setSmartTvMessage] = useState("Preparing a local Smart TV display link…");
+  const selected = castTargets.find((target) => target.id === selectedId) || castTargets[0];
+  const selectedDevice = devices.find((device) => device.id === selectedDeviceId);
+  const isPrivate = selected.visibility === "Private clinical";
+  const receiverAppId = (import.meta.env.VITE_GOOGLE_CAST_APP_ID as string | undefined)?.trim();
+  const scanLocalNetwork = useCallback(async () => {
+    setIsScanning(true);
+    setDiscoveryMessage("Scanning this computer’s local network for Chromecast devices…");
+    try {
+      const response = await fetch("/api/cast/discover", {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Local discovery endpoint is unavailable");
+      const result = (await response.json()) as CastDiscoveryResponse;
+      setDevices(result.devices || []);
+      setSelectedDeviceId((current) =>
+        result.devices.some((device) => device.id === current)
+          ? current
+          : result.devices[0]?.id || "",
+      );
+      setDiscoveryMessage(result.hint || "Local network scan completed.");
+    } catch {
+      setDevices([]);
+      setSelectedDeviceId("");
+      setDiscoveryMessage("Local device discovery is available only while SmartServe runs through its local development server. Start it with npm run dev, then scan again.");
+    } finally {
+      setIsScanning(false);
+    }
+  }, []);
+  const loadSmartTvLinks = useCallback(async () => {
+    try {
+      const response = await fetch("/api/smart-tv-link", {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Smart TV link is unavailable");
+      const result = (await response.json()) as { urls?: string[] };
+      const urls = Array.isArray(result.urls) ? result.urls : [];
+      setSmartTvUrls(urls);
+      setSmartTvMessage(
+        urls.length
+          ? "Open this public, queue-numbers-only link in the Smart TV browser."
+          : "No LAN address was found. Start SmartServe on the clinic computer, then refresh this page.",
+      );
+    } catch {
+      setSmartTvUrls([]);
+      setSmartTvMessage("The Smart TV display link is available only while SmartServe is running through its local development server.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void scanLocalNetwork();
+    void loadSmartTvLinks();
+  }, [loadSmartTvLinks, scanLocalNetwork]);
+
+  const requestDevice = async () => {
+    if (isPrivate && !privateDisplayConfirmed) {
+      setStatus("Confirm that this is a private display before selecting a device.");
+      return;
+    }
+    if (!receiverAppId) {
+      setStatus(`${selectedDevice ? `${selectedDevice.displayName} is selected from your LAN scan. ` : ""}Chromecast receiver is not configured. Add VITE_GOOGLE_CAST_APP_ID after registering a SmartServe Google Cast Receiver, then use an HTTPS deployment.`);
+      return;
+    }
+    const cast = (window as typeof window & { chrome?: any }).chrome?.cast;
+    const castContext = cast?.framework?.CastContext?.getInstance?.();
+    if (!castContext) {
+      setStatus("Google Cast is not available in this browser. Open this HTTPS app in Chrome with the Google Cast Sender SDK configured.");
+      return;
+    }
+    try {
+      castContext.setOptions({
+        receiverApplicationId: receiverAppId,
+        autoJoinPolicy: cast.AutoJoinPolicy?.ORIGIN_SCOPED,
+      });
+      setStatus(`${selectedDevice ? `${selectedDevice.displayName} is selected from the LAN scan. ` : ""}Opening Chrome’s device picker—choose the same device to confirm the cast session…`);
+      const session = await castContext.requestSession();
+      await session.sendMessage("urn:x-cast:smartserve.ui", {
+        targetId: selected.id,
+        label: selected.label,
+      });
+      const receiverName =
+        session.getCastDevice?.()?.friendlyName ||
+        selectedDevice?.displayName ||
+        "the selected receiver";
+      setActiveCast({
+        workspaceId: selected.id,
+        workspaceLabel: selected.label,
+        deviceName: receiverName,
+        startedAt: new Date().toISOString(),
+      });
+      setStatus(`${selected.label} is now casted on ${receiverName}.`);
+    } catch {
+      setStatus("Casting was not started. The device picker may have been closed, or the custom receiver is not ready.");
+    }
+  };
+  const disconnectCast = async () => {
+    const cast = (window as typeof window & { chrome?: any }).chrome?.cast;
+    const castContext = cast?.framework?.CastContext?.getInstance?.();
+    const session = castContext?.getCurrentSession?.();
+    if (!session) {
+      setActiveCast(null);
+      setStatus("There is no active Chromecast session to disconnect.");
+      return;
+    }
+    try {
+      await session.endSession(true);
+      setStatus(`${activeCast?.workspaceLabel || "The workspace"} was disconnected from ${activeCast?.deviceName || "the Chromecast device"}.`);
+      setActiveCast(null);
+    } catch {
+      setStatus("SmartServe could not disconnect the Cast session. Check the receiver and try again.");
+    }
+  };
+
+  return (
+    <>
+      <Head title="Cast Center" sub="Choose a registered SmartServe workspace and send it to an approved Chromecast display." />
+      <div className="grid gap-5 xl:grid-cols-[1.2fr,.8fr]">
+        <Panel title="Registered castable workspaces">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {castTargets.map((target) => {
+              const active = selectedId === target.id;
+              return (
+                <button key={target.id} type="button" onClick={() => setSelectedId(target.id)} className={`rounded-2xl border p-4 text-left transition-smooth ${active ? "border-primary bg-primary-soft shadow-soft" : "border-border bg-card hover:border-primary/40"}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="grid h-9 w-9 place-items-center rounded-xl bg-background text-primary"><Cast className="h-4 w-4" /></div>
+                    <Badge className={target.visibility === "Public-safe" ? "border-0 bg-secondary-soft text-secondary" : "border-0 bg-muted text-muted-foreground"}>{target.visibility}</Badge>
+                  </div>
+                  <p className="mt-3 font-semibold">{target.label}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{target.description}</p>
+                  <p className="mt-3 font-mono text-[10px] text-primary">ID: {target.id}</p>
+                </button>
+              );
+            })}
+          </div>
+        </Panel>
+        <div className="space-y-5">
+          <Panel title="Smart TV display link">
+            <div className="rounded-2xl border border-secondary/20 bg-secondary-soft p-4">
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-card text-secondary shadow-soft"><Tv className="h-5 w-5" /></span>
+                <div>
+                  <p className="text-sm font-semibold">No Chromecast receiver needed</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">Use the TV’s built-in browser while it is on the same clinic network. The page receives only public queue numbers, rooms, and queue states from the local staff workspace.</p>
+                </div>
+              </div>
+              {smartTvUrls[0] ? (
+                <>
+                  <code className="mt-4 block break-all rounded-xl bg-card/80 px-3 py-2 text-xs text-primary">{smartTvUrls[0]}</code>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(smartTvUrls[0]).then(() => setSmartTvMessage("Smart TV link copied. Open it in the TV browser.")).catch(() => setSmartTvMessage("Copy was blocked by this browser. Enter the displayed address manually on the TV."))}>
+                      <Copy className="mr-2 h-4 w-4" />Copy TV link
+                    </Button>
+                    <a href={smartTvUrls[0]} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">Preview queue board</a>
+                  </div>
+                </>
+              ) : null}
+            </div>
+            <p role="status" className="mt-3 text-xs leading-5 text-muted-foreground">{smartTvMessage}</p>
+          </Panel>
+          <Panel
+            title="Chromecast devices on this LAN"
+            action={
+              <Button size="sm" variant="outline" onClick={() => void scanLocalNetwork()} disabled={isScanning}>
+                <RefreshCw className={`mr-2 h-4 w-4 ${isScanning ? "animate-spin" : ""}`} />
+                {isScanning ? "Scanning" : "Scan network"}
+              </Button>
+            }
+          >
+            {devices.length ? (
+              <div className="space-y-2">
+                {devices.map((device) => {
+                  const active = device.id === selectedDeviceId;
+                  return (
+                    <button
+                      key={device.id}
+                      type="button"
+                      onClick={() => setSelectedDeviceId(device.id)}
+                      className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-smooth ${active ? "border-primary bg-primary-soft" : "border-border hover:border-primary/40"}`}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-muted text-primary"><Radio className="h-4 w-4" /></span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold">{device.displayName}</span>
+                          <span className="block truncate text-[11px] text-muted-foreground">{device.model} · {device.address}:{device.port}</span>
+                        </span>
+                      </span>
+                      {active ? <Badge className="border-0 bg-primary text-primary-foreground">Selected</Badge> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4 text-center">
+                <Radio className={`mx-auto h-5 w-5 text-primary ${isScanning ? "animate-pulse" : ""}`} />
+                <p className="mt-2 text-sm font-medium">{isScanning ? "Looking for devices…" : "No Chromecast found"}</p>
+              </div>
+            )}
+            <p role="status" className="mt-3 text-xs leading-5 text-muted-foreground">{discoveryMessage}</p>
+          </Panel>
+          <Panel title="Cast session status">
+            {activeCast ? (
+              <div className="rounded-2xl border border-secondary/25 bg-secondary-soft p-4">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-card text-secondary shadow-soft"><Cast className="h-5 w-5" /></span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-[.12em] text-secondary">Casting now</p>
+                    <p className="mt-1 text-sm font-semibold">{activeCast.workspaceLabel}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Casted on {activeCast.deviceName} · started {new Date(activeCast.startedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}</p>
+                  </div>
+                </div>
+                <Button variant="outline" className="mt-4 w-full border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => void disconnectCast()}>
+                  <Unplug className="mr-2 h-4 w-4" />
+                  Disconnect from {activeCast.deviceName}
+                </Button>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-4 text-center">
+                <Cast className="mx-auto h-5 w-5 text-muted-foreground" />
+                <p className="mt-2 text-sm font-medium">No active cast session</p>
+                <p className="mt-1 text-xs text-muted-foreground">After you confirm a receiver, this card will identify the casted workspace and device.</p>
+              </div>
+            )}
+          </Panel>
+          <Panel title="Send to Chromecast">
+            <div className="rounded-2xl border border-primary/15 bg-primary-soft/60 p-4">
+              <p className="text-xs font-semibold text-primary">Selected workspace</p>
+              <p className="mt-1 font-display text-xl font-bold">{selected.label}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{selected.description}</p>
+              <p className="mt-3 font-mono text-[10px] text-primary">{selected.id}</p>
+            </div>
+            {isPrivate ? (
+              <label className="mt-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                <input type="checkbox" checked={privateDisplayConfirmed} onChange={(event) => setPrivateDisplayConfirmed(event.target.checked)} className="mt-0.5" />
+                <span><strong>Private display confirmed.</strong> This screen may contain protected clinic or patient information. Do not cast it to a public waiting area.</span>
+              </label>
+            ) : (
+              <div className="mt-4 rounded-xl border border-secondary/20 bg-secondary-soft p-3 text-xs text-secondary-foreground">This is the only public-safe target. It displays queue numbers, never patient names.</div>
+            )}
+            <Button className="mt-4 w-full" onClick={requestDevice}>
+              <Cast className="mr-2 h-4 w-4" />
+              Confirm cast device
+            </Button>
+            <p role="status" className="mt-3 text-xs text-muted-foreground">{status}</p>
+          </Panel>
+          <Panel title="Deployment requirement">
+            <p className="text-xs leading-5 text-muted-foreground">The rendered list is discovered by this computer’s local SmartServe server through mDNS. Chrome still requires its approved device picker to create the cast session. To render a SmartServe view, production also needs a registered custom Google Cast Receiver ID and an HTTPS-hosted receiver app.</p>
+            <p className={`mt-3 rounded-xl px-3 py-2 text-xs ${receiverAppId ? "bg-secondary-soft text-secondary-foreground" : "bg-muted text-muted-foreground"}`}>{receiverAppId ? "Receiver ID detected for this build." : "No receiver ID is configured in this local build yet."}</p>
+          </Panel>
+        </div>
+      </div>
+    </>
+  );
+}
+type InventoryHistoryKind = "all" | "stock-in" | "dispense";
+type InventoryHistoryRange = "7" | "30" | "custom";
+type InventoryTransaction = {
+  id: string;
+  at: string;
+  type: Exclude<InventoryHistoryKind, "all">;
+  quantity: number;
+  medicine: string;
+  batch: string;
+};
+
+const csvValue = (value: string | number) =>
+  `"${String(value).replaceAll('"', '""')}"`;
+
+function MedicinePage({ medicines, audit, add, update, remove }: any) {
   const [name, setName] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  if (historyOpen)
+    return (
+      <InventoryHistory
+        medicines={medicines}
+        audit={audit}
+        onClose={() => setHistoryOpen(false)}
+      />
+    );
   return (
     <>
       <Head
         title="Medicine catalogue"
         sub="Create, edit, or remove local medicine items."
         action={
-          <Button
-            onClick={() => {
-              if (!name) return;
-              add({
-                name,
-                strength: "",
-                form: "Tablet",
-                stock: 0,
-                reorderLevel: 0,
-                expiry: "Not set",
-                batch: "Not set",
-              });
-              setName("");
-            }}
-          >
-            Add medicine
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => {
+                if (!name) return;
+                add({
+                  name,
+                  strength: "",
+                  form: "Tablet",
+                  stock: 0,
+                  reorderLevel: 0,
+                  expiry: "Not set",
+                  batch: "Not set",
+                });
+                setName("");
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add medicine
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setHistoryOpen(true)}
+            >
+              <TrendingUp className="mr-2 h-4 w-4" />
+              Transaction history
+            </Button>
+          </div>
         }
       />
       <Input
@@ -2717,6 +3367,281 @@ function MedicinePage({ medicines, add, update, remove }: any) {
         ))}
       </Panel>
     </>
+  );
+}
+
+function InventoryHistory({
+  medicines,
+  audit,
+  onClose,
+}: {
+  medicines: any[];
+  audit: AuditEvent[];
+  onClose: () => void;
+}) {
+  const [kind, setKind] = useState<InventoryHistoryKind>("all");
+  const [range, setRange] = useState<InventoryHistoryRange>("30");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const transactions = useMemo<InventoryTransaction[]>(() => {
+    const medicinesById = new Map(
+      medicines.map((medicine) => [medicine.id, medicine]),
+    );
+    return audit.flatMap((event) => {
+      const quantityMatch = event.action.match(/(?:Received|Dispensed)\s+(\d+)/i);
+      if (!quantityMatch) return [];
+      const quantity = Number(quantityMatch[1]);
+      const isStockIn = event.action.startsWith("Received ");
+      const isDispense = event.action.startsWith("Dispensed ");
+      if (!isStockIn && !isDispense) return [];
+      const medicineId = isDispense
+        ? event.reference.split("/").at(-1) || ""
+        : event.reference;
+      const medicine = medicinesById.get(medicineId);
+      return [
+        {
+          id: event.id,
+          at: event.at,
+          type: isStockIn ? "stock-in" : "dispense",
+          quantity,
+          medicine: medicine
+            ? `${medicine.name} ${medicine.strength}`.trim()
+            : "Deleted medicine",
+          batch: medicine?.batch || "Not available",
+        },
+      ];
+    });
+  }, [audit, medicines]);
+  const dateBounds = useMemo(() => {
+    if (range === "custom") {
+      return {
+        from: from ? new Date(`${from}T00:00:00`) : undefined,
+        to: to ? new Date(`${to}T23:59:59.999`) : undefined,
+      };
+    }
+    const toDate = new Date();
+    toDate.setHours(23, 59, 59, 999);
+    const fromDate = new Date(toDate);
+    fromDate.setDate(toDate.getDate() - (Number(range) - 1));
+    fromDate.setHours(0, 0, 0, 0);
+    return { from: fromDate, to: toDate };
+  }, [from, range, to]);
+  const filteredTransactions = useMemo(
+    () =>
+      transactions
+        .filter((transaction) => {
+          const at = new Date(transaction.at);
+          return (
+            (kind === "all" || transaction.type === kind) &&
+            (!dateBounds.from || at >= dateBounds.from) &&
+            (!dateBounds.to || at <= dateBounds.to)
+          );
+        })
+        .toSorted(
+          (left, right) =>
+            new Date(right.at).getTime() - new Date(left.at).getTime(),
+        ),
+    [dateBounds, kind, transactions],
+  );
+  const chartData = useMemo(() => {
+    const daily = new Map<string, { date: string; stockIn: number; dispensed: number }>();
+    filteredTransactions.forEach((transaction) => {
+      const date = transaction.at.slice(0, 10);
+      const current = daily.get(date) || { date, stockIn: 0, dispensed: 0 };
+      if (transaction.type === "stock-in") current.stockIn += transaction.quantity;
+      else current.dispensed += transaction.quantity;
+      daily.set(date, current);
+    });
+    return Array.from(daily.values()).toSorted((left, right) =>
+      left.date.localeCompare(right.date),
+    );
+  }, [filteredTransactions]);
+  const totalStockIn = filteredTransactions
+    .filter((transaction) => transaction.type === "stock-in")
+    .reduce((total, transaction) => total + transaction.quantity, 0);
+  const totalDispensed = filteredTransactions
+    .filter((transaction) => transaction.type === "dispense")
+    .reduce((total, transaction) => total + transaction.quantity, 0);
+  const exportHistory = () => {
+    const csv = [
+      ["Date and time", "Transaction", "Medicine", "Batch", "Quantity"],
+      ...filteredTransactions.map((transaction) => [
+        new Date(transaction.at).toLocaleString("en-PH"),
+        transaction.type === "stock-in" ? "Stock-in" : "Dispensed",
+        transaction.medicine,
+        transaction.batch,
+        transaction.quantity,
+      ]),
+    ]
+      .map((row) => row.map(csvValue).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `smartserve-inventory-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div>
+      <Head
+        title="Inventory transaction history"
+        sub="Review local stock-in and dispensing activity, then export the filtered report."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={exportHistory}>
+              <Download className="mr-2 h-4 w-4" />
+              Export report
+            </Button>
+            <Button variant="outline" onClick={onClose}>
+              <X className="mr-2 h-4 w-4" />
+              Close history
+            </Button>
+          </div>
+        }
+      />
+      <Panel title="History filters">
+        <div className="grid gap-4 md:grid-cols-3">
+          <div>
+            <Label>Show</Label>
+            <select
+              value={kind}
+              onChange={(event) => setKind(event.target.value as InventoryHistoryKind)}
+              className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"
+            >
+              <option value="all">Stock-in and dispensing</option>
+              <option value="stock-in">Stock-in only</option>
+              <option value="dispense">Dispensing only</option>
+            </select>
+          </div>
+          <div>
+            <Label>Period</Label>
+            <select
+              value={range}
+              onChange={(event) => setRange(event.target.value as InventoryHistoryRange)}
+              className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"
+            >
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="custom">Custom range</option>
+            </select>
+          </div>
+          {range === "custom" ? (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>From</Label>
+                <Input
+                  type="date"
+                  value={from}
+                  onChange={(event) => setFrom(event.target.value)}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>To</Label>
+                <Input
+                  type="date"
+                  value={to}
+                  onChange={(event) => setTo(event.target.value)}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+              {range === "7" ? "Seven-day" : "Thirty-day"} rolling window
+            </div>
+          )}
+        </div>
+      </Panel>
+      <div className="mb-5 grid gap-4 sm:grid-cols-3">
+        <Kpi label="Transactions" value={filteredTransactions.length} />
+        <Kpi label="Stock-in units" value={totalStockIn} />
+        <Kpi label="Dispensed units" value={totalDispensed} />
+      </div>
+      <Panel
+        title="Medicine movement"
+        action={<span className="text-xs text-muted-foreground">Units by day</span>}
+      >
+        {chartData.length ? (
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={(value) =>
+                    new Date(`${value}T00:00:00`).toLocaleDateString("en-PH", {
+                      month: "short",
+                      day: "numeric",
+                    })
+                  }
+                />
+                <YAxis allowDecimals={false} />
+                <Tooltip
+                  labelFormatter={(value) =>
+                    new Date(`${value}T00:00:00`).toLocaleDateString("en-PH", {
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric",
+                    })
+                  }
+                />
+                {kind !== "dispense" ? (
+                  <Bar dataKey="stockIn" name="Stock-in" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
+                ) : null}
+                {kind !== "stock-in" ? (
+                  <Bar dataKey="dispensed" name="Dispensed" fill="#f97316" radius={[6, 6, 0, 0]} />
+                ) : null}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-border bg-muted/30 px-5 py-14 text-center text-sm text-muted-foreground">
+            No inventory transactions match this filter yet.
+          </div>
+        )}
+      </Panel>
+      <Panel title="Filtered transaction records">
+        {filteredTransactions.length ? (
+          <div className="divide-y divide-border">
+            {filteredTransactions.map((transaction) => (
+              <div
+                key={transaction.id}
+                className="flex flex-wrap items-center justify-between gap-3 py-3"
+              >
+                <div>
+                  <p className="font-medium">{transaction.medicine}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(transaction.at).toLocaleString("en-PH")} · Batch {transaction.batch}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge
+                    className={
+                      transaction.type === "stock-in"
+                        ? "border-0 bg-secondary-soft text-secondary"
+                        : "border-0 bg-warning/15 text-warning"
+                    }
+                  >
+                    {transaction.type === "stock-in" ? "Stock-in" : "Dispensed"}
+                  </Badge>
+                  <span className="font-display text-lg font-bold">
+                    {transaction.type === "stock-in" ? "+" : "−"}
+                    {transaction.quantity}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-center text-sm text-muted-foreground">
+            No records to display.
+          </p>
+        )}
+      </Panel>
+    </div>
   );
 }
 function Head({
@@ -2810,9 +3735,9 @@ function Field({
 }
 function Kpi({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-5 shadow-soft">
-      <p className="font-display text-3xl font-bold">{value}</p>
-      <p className="text-xs text-muted-foreground">{label}</p>
+    <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-soft">
+      <p className="font-display text-2xl font-bold leading-none">{value}</p>
+      <p className="mt-1 text-xs leading-none text-muted-foreground">{label}</p>
     </div>
   );
 }
