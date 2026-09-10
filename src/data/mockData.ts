@@ -78,6 +78,8 @@ export interface Patient {
   mobileLocationMunicipality?: string;
   mobileLocationProvince?: string;
   mobileLocationAccuracy?: number;
+  /** True only for a newly created portal patient until their first service location is captured. */
+  requiresInitialServiceLocation?: boolean;
   consentToTreatment?: boolean;
   privacyAcknowledged?: boolean;
 }
@@ -545,8 +547,10 @@ export const diseaseRecords: DiseaseRecord[] = [
     count: 8,
     barangay: "Masaya Sur",
     municipality: "San Agustin",
-    latitude: 16.4925,
-    longitude: 121.746,
+    // Masaya Sur Elementary School provides a verified public reference
+    // point for this barangay rather than the neighbouring Dappig road pin.
+    latitude: 16.49914,
+    longitude: 121.74633,
   },
   {
     id: "d9",

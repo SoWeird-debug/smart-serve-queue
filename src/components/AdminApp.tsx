@@ -277,8 +277,8 @@ function PageContent({ page, store }: any) {
             diagnosis: r.diagnosis,
             date: r.date,
             count: 1,
-            barangay: p.barangay,
-            municipality: p.municipality,
+            barangay: p.mobileLocationBarangay || p.barangay,
+            municipality: p.mobileLocationMunicipality || p.municipality,
             latitude: p.latitude,
             longitude: p.longitude,
           },
@@ -290,7 +290,7 @@ function PageContent({ page, store }: any) {
     <>
       <Head
         title="Disease trends"
-        sub="Completed consultation diagnoses mapped only from verified or specifically selected residence locations."
+        sub="Completed consultation diagnoses mapped from verified current locations captured when patients selected a service."
       />
       {records.length ? (
         <DiseaseTrendMap records={records} />

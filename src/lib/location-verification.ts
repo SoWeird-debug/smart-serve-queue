@@ -47,19 +47,35 @@ export function compareBarangayLocation(
 ): BarangayLocationMatch {
   if (!detected) return { status: "checking" };
   const areaFields = ["barangay", "municipality", "province"] as const;
-  const comparableFields = areaFields.filter(
-    (field) => Boolean(residence[field] && detected[field]),
-  );
-  const hasConflict = comparableFields.some(
-    (field) =>
-      normalizeAreaName(residence[field]) !==
-      normalizeAreaName(detected[field]),
-  );
+  const matches = (field: keyof ResidenceArea) =>
+    Boolean(
+      residence[field] &&
+        detected[field] &&
+        normalizeAreaName(residence[field]) ===
+          normalizeAreaName(detected[field]),
+    );
+  const conflicts = (field: keyof ResidenceArea) =>
+    Boolean(
+      residence[field] &&
+        detected[field] &&
+        normalizeAreaName(residence[field]) !==
+          normalizeAreaName(detected[field]),
+    );
+
+  // Philippine reverse-geocoding data often returns a purok or zone in the
+  // barangay field (for example, "Zone 7") instead of the official barangay.
+  // A conflicting locality label alone is therefore not reliable enough to
+  // reject someone when their municipality or province agrees.
+  const hasParentConflict =
+    conflicts("municipality") || conflicts("province");
+  const hasParentMatch = matches("municipality") || matches("province");
+  const barangayMatches = matches("barangay");
+  const barangayConflicts = conflicts("barangay");
   const hasCompleteDetectedArea = areaFields.every((field) =>
     Boolean(detected[field]),
   );
 
-  if (hasConflict) {
+  if (hasParentConflict) {
     return {
       status: "mismatched",
       detected: {
@@ -69,7 +85,7 @@ export function compareBarangayLocation(
       },
     };
   }
-  if (hasCompleteDetectedArea) {
+  if (hasCompleteDetectedArea && barangayMatches) {
     return {
       status: "matched",
       detected: {
@@ -79,7 +95,12 @@ export function compareBarangayLocation(
       },
     };
   }
-  if (comparableFields.length > 0)
+
+  // Do not infer that an unrecognised locality is in the registered barangay
+  // unless a higher-level administrative area confirms the location.
+  if (barangayConflicts && !hasParentMatch)
+    return { status: "incomplete", detected };
+  if (barangayMatches || hasParentMatch)
     return { status: "partial-match", detected };
   return { status: "incomplete", detected };
 }

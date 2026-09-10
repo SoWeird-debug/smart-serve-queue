@@ -11,6 +11,9 @@ type NominatimReverseResult = {
   address?: Record<string, string | undefined>;
 };
 
+const normalizeAreaName = (value?: string) =>
+  value?.trim().toLocaleLowerCase("en-PH").replace(/[^a-z0-9]/g, "") || "";
+
 export async function reverseGeocodePhilippineAddress(
   location: PinnedLocation,
   signal?: AbortSignal,
@@ -37,10 +40,16 @@ export async function reverseGeocodePhilippineAddress(
     address.city_district ||
     address.county ||
     address.district;
-  // OSM frequently uses `state` for a Philippine *region* (for example,
-  // Cagayan Valley), not the province. Do not treat it as a province because
-  // that creates a false mismatch with records such as Isabela.
-  const province = address.province || address.state_district;
+  // OSM can put either a province (for example, Isabela) or a region (for
+  // example, Cagayan Valley) in `state`. Use it only when it differs from the
+  // reported region so province-level mismatches remain detectable.
+  const province =
+    address.province ||
+    address.state_district ||
+    (address.state &&
+    normalizeAreaName(address.state) !== normalizeAreaName(address.region)
+      ? address.state
+      : undefined);
   const postalCode = address.postcode?.trim();
 
   return {

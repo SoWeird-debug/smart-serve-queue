@@ -1214,6 +1214,10 @@ export function PrototypeStoreProvider({
           locationVerifiedAt: input.locationVerified
             ? input.locationVerifiedAt || now()
             : undefined,
+          // Existing clinic records never receive this flag when linked to a
+          // portal account. Only a newly created portal patient is asked for
+          // location at their first service selection.
+          requiresInitialServiceLocation: true,
           consentToTreatment: input.consentToTreatment ?? false,
           privacyAcknowledged: input.privacyAcknowledged ?? false,
         };

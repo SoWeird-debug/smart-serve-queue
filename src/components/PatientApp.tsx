@@ -52,7 +52,6 @@ import {
   reverseGeocodePhilippineAddress,
   type DetectedPhilippineAddress,
 } from "@/lib/location-address";
-import { compareBarangayLocation } from "@/lib/location-verification";
 
 const iconMap = {
   Stethoscope,
@@ -65,6 +64,16 @@ const iconMap = {
 };
 const rememberedSessionKey = "smartserve-patient-remembered-session";
 const rememberedMobileKey = "smartserve-patient-remembered-mobile";
+const MAX_SERVICE_LOCATION_ACCURACY_METERS = 200;
+
+const normalizeAreaName = (value?: string) =>
+  value?.trim().toLocaleLowerCase("en-PH").replace(/[^a-z0-9]/g, "") || "";
+const isJonesIsabela = (area: {
+  municipality?: string;
+  province?: string;
+}) =>
+  normalizeAreaName(area.municipality) === "jones" &&
+  normalizeAreaName(area.province) === "isabela";
 
 type Screen =
   | "login"
@@ -101,7 +110,6 @@ export function PatientApp() {
     markNotificationRead,
   } = usePrototypeStore();
   const me = patients.find((patient) => patient.id === patientId) || null;
-  const locationReady = Boolean(me?.mobileLocationVerifiedAt);
   useEffect(() => {
     if (patientId && !me) {
       localStorage.removeItem(rememberedSessionKey);
@@ -120,18 +128,8 @@ export function PatientApp() {
     setPatientId(null);
     setScreen("login");
   };
-  const openServices = () =>
-    setScreen(locationReady ? "services" : "verifyLocation");
-  const navigate = (next: Screen) => {
-    if (
-      !locationReady &&
-      (next === "services" || next === "schedule" || next === "confirm")
-    ) {
-      setScreen("verifyLocation");
-      return;
-    }
-    setScreen(next);
-  };
+  const openServices = () => setScreen("services");
+  const navigate = (next: Screen) => setScreen(next);
 
   return (
     <div className="flex flex-col items-center gap-6">
@@ -173,8 +171,8 @@ export function PatientApp() {
             <PatientLocationVerificationScreen
               patient={me}
               updatePatient={updatePatient}
-              onBack={() => setScreen("home")}
-              onVerified={() => setScreen("services")}
+              onBack={() => setScreen("services")}
+              onVerified={() => setScreen("schedule")}
             />
           )}
           {screen === "home" && me && (
@@ -192,7 +190,11 @@ export function PatientApp() {
               onBack={() => setScreen("home")}
               onPick={(id) => {
                 setSelectedService(id);
-                setScreen("schedule");
+                setScreen(
+                  me?.requiresInitialServiceLocation
+                    ? "verifyLocation"
+                    : "schedule",
+                );
               }}
             />
           )}
@@ -512,12 +514,12 @@ function LoginScreen({
                     Residence pin
                   </p>
                   <p className="mb-2 text-[10px] text-muted-foreground">
-                    Use your current location or tap the map where you live. You
-                    can continue with barangay only if no precise pin is
-                    available.
+                    Place a pin for the residence address you entered. Device
+                    location is requested only after a service is selected.
                   </p>
                   <LocationPickerMap
                     value={registrationLocation}
+                    showCurrentLocation={false}
                     onChange={(location) => {
                       setRegistrationLocation(location);
                       setRegistrationLocationSource("Patient-selected pin");
@@ -688,8 +690,8 @@ function OnlineRegistrationWizard({
     email: "",
     addressLine: "",
     barangay: "",
-    municipality: "",
-    province: "",
+    municipality: "Jones",
+    province: "Isabela",
     postalCode: "",
     philHealthClientType: "Not enrolled" as NonNullable<
       Patient["philHealthClientType"]
@@ -707,13 +709,6 @@ function OnlineRegistrationWizard({
     consentToTreatment: false,
     privacyAcknowledged: false,
   });
-  const [residencePin, setResidencePin] = useState<PinnedLocation | null>(null);
-  const [pinSource, setPinSource] = useState<
-    "Current device location" | "Patient-selected pin"
-  >("Patient-selected pin");
-  const [detectedResidenceAddress, setDetectedResidenceAddress] =
-    useState<DetectedPhilippineAddress | null>(null);
-  const [locationStatus, setLocationStatus] = useState("");
   const [error, setError] = useState("");
   const age = calculateAge(form.dob);
   const needsGuardian = age !== null && age < 18;
@@ -738,37 +733,6 @@ function OnlineRegistrationWizard({
     .join(", ");
   const set = (key: string, value: any) =>
     setForm((current) => ({ ...current, [key]: value }));
-  const fillLocationDetails = async (location: PinnedLocation) => {
-    setLocationStatus(
-      "Looking up your province, municipality, barangay, and postal code…",
-    );
-    try {
-      const details = await reverseGeocodePhilippineAddress(location);
-      setDetectedResidenceAddress(details);
-      setLocationStatus(
-        "Current location detected. SmartServe is comparing it with your registered residence.",
-      );
-    } catch {
-      setDetectedResidenceAddress(null);
-      setLocationStatus(
-        "Your location was captured, but its barangay could not be identified. Please try again.",
-      );
-    }
-  };
-  const locationMatch =
-    residencePin && pinSource === "Current device location"
-      ? compareBarangayLocation(form, detectedResidenceAddress)
-      : { status: "required" as const };
-  const verifiedArea =
-    locationMatch.status === "matched" ||
-    locationMatch.status === "partial-match"
-      ? locationMatch.detected
-      : undefined;
-  const hasVerifiedArea = Boolean(verifiedArea);
-  const locationAccuracyAcceptable =
-    residencePin?.accuracy === undefined || residencePin.accuracy <= 1000;
-  const currentLocationVerified =
-    hasVerifiedArea && locationAccuracyAcceptable;
   const stepProblem = () => {
     if (step === 1 && (!form.familyName || !form.givenName || !form.dob))
       return "Enter your last name, first name, and date of birth.";
@@ -782,6 +746,8 @@ function OnlineRegistrationWizard({
         !form.postalCode)
     )
       return "Complete your mobile number and full residence address.";
+    if (step === 2 && !isJonesIsabela(form))
+      return "Online registration is available only to residents of Jones, Isabela.";
     if (
       step === 3 &&
       ((form.philHealthClientType !== "Not enrolled" && !form.philHealthPin) ||
@@ -802,12 +768,6 @@ function OnlineRegistrationWizard({
         form.password.length < 4
       )
         return "Create a password, acknowledge the Privacy Notice, and confirm consent to treatment.";
-      if (!residencePin || pinSource !== "Current device location")
-        return "Use your current location to verify the barangay before continuing.";
-      if (!locationAccuracyAcceptable)
-        return "Your current location is not accurate enough. Move to a clearer area and try again.";
-      if (!hasVerifiedArea)
-        return "SmartServe could not match your current area to the registered residence. Try again after checking the address details.";
     }
     return "";
   };
@@ -857,23 +817,8 @@ function OnlineRegistrationWizard({
         emergencyContactName: form.emergencyContactName,
         emergencyContactRelationship: form.emergencyContactRelationship,
         emergencyContactPhone: form.emergencyContactPhone,
-        latitude: residencePin?.latitude,
-        longitude: residencePin?.longitude,
-        locationAccuracy: residencePin?.accuracy,
-        locationSource: "Current device location",
-        locationVerified: currentLocationVerified,
-        locationVerifiedAt:
-          currentLocationVerified ? new Date().toISOString() : undefined,
-        mobileLocationVerifiedAt: currentLocationVerified
-          ? new Date().toISOString()
-          : undefined,
-        mobileLocationBarangay:
-          verifiedArea?.barangay,
-        mobileLocationMunicipality:
-          verifiedArea?.municipality,
-        mobileLocationProvince:
-          verifiedArea?.province,
-        mobileLocationAccuracy: residencePin?.accuracy,
+        locationSource: "Barangay fallback",
+        locationVerified: false,
         consentToTreatment: form.consentToTreatment,
         privacyAcknowledged: form.privacyAcknowledged,
       },
@@ -891,7 +836,7 @@ function OnlineRegistrationWizard({
     ["Identity", "Your legal patient details"],
     ["Contact", "Contact and residence"],
     ["Coverage", "PhilHealth and guardian"],
-    ["Verification", "Location, consent, and account"],
+    ["Consent", "Consent and account"],
   ] as const;
   return (
     <div className="min-h-full bg-gradient-hero p-5 pt-12 text-primary-foreground">
@@ -1093,6 +1038,10 @@ function OnlineRegistrationWizard({
                 set("postalCode", value.replace(/\D/g, "").slice(0, 4))
               }
             />
+            <p className="rounded-xl border border-primary/15 bg-primary-soft px-3 py-2 text-[11px] text-primary">
+              Online registration serves all barangays in Jones, Isabela. Your
+              current location is requested only when you select a service.
+            </p>
           </div>
         ) : step === 3 ? (
           <div className="space-y-3">
@@ -1199,67 +1148,12 @@ function OnlineRegistrationWizard({
         ) : (
           <div className="space-y-3">
             <div className="rounded-2xl border border-border bg-muted/40 p-3">
-              <p className="text-xs font-semibold">Residence pin</p>
-              <p className="mb-2 text-[10px] text-muted-foreground">
-                To use SmartServe online services, use your current location
-                while you are at your registered residence. The detected
-                barangay must match your registration details.
+              <p className="text-xs font-semibold">Location is collected when booking</p>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Registration stores the address you entered. SmartServe asks for
+                your current location only after you choose a clinic service, so
+                the verified pin can support disease-trend mapping.
               </p>
-              <LocationPickerMap
-                value={residencePin}
-                allowManualPin={false}
-                onChange={(location, method) => {
-                  setResidencePin(location);
-                  setPinSource(
-                    method === "Current device location"
-                      ? "Current device location"
-                      : "Patient-selected pin",
-                  );
-                  setDetectedResidenceAddress(null);
-                  void fillLocationDetails(location);
-                }}
-              />
-              {locationStatus ? (
-                <p className="mt-2 text-[10px] text-muted-foreground">
-                  {locationStatus}
-                </p>
-              ) : null}
-              {residencePin && !locationAccuracyAcceptable ? (
-                <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[10px] text-amber-800">
-                  GPS accuracy is ±{residencePin.accuracy} m. Move to a clearer
-                  area and try again before continuing.
-                </p>
-              ) : null}
-              {locationMatch.status === "partial-match" && currentLocationVerified ? (
-                <div className="mt-2 rounded-xl border border-primary/20 bg-primary-soft px-3 py-2 text-[10px] text-primary-foreground">
-                  SmartServe verified the available area details from your current
-                  location. The map service did not return every address level.
-                </div>
-              ) : null}
-              {locationMatch.status === "incomplete" ? (
-                <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[10px] text-amber-800">
-                  SmartServe could not identify a complete barangay,
-                  municipality, and province from your current location. Try
-                  again with a better signal.
-                </p>
-              ) : null}
-              {locationMatch.status === "mismatched" ? (
-                <div className="mt-2 rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-[10px] text-destructive">
-                  <p className="font-semibold">
-                    Current location does not match your registered address.
-                  </p>
-                  <p className="mt-1">
-                    Detected: {locationMatch.detected.barangay},{" "}
-                    {locationMatch.detected.municipality},{" "}
-                    {locationMatch.detected.province}
-                  </p>
-                </div>
-              ) : null}
-              {currentLocationVerified ? (
-                <div className="mt-2 rounded-xl border border-secondary/25 bg-secondary-soft px-3 py-2 text-[10px] text-secondary-foreground">
-                  Your registered barangay has been verified from this device.
-                </div>
-              ) : null}
             </div>
             <PortalInput
               id="online-password"
@@ -1355,31 +1249,18 @@ function PatientLocationVerificationScreen({
     useState<DetectedPhilippineAddress | null>(null);
   const [lookupError, setLookupError] = useState("");
   const [isChecking, setIsChecking] = useState(false);
-  const [fallbackConfirmed, setFallbackConfirmed] = useState(false);
-  const locationMatch = currentPin
-    ? compareBarangayLocation(patient, detectedAddress)
-    : { status: "required" as const };
-  const verifiedArea =
-    locationMatch.status === "matched" ||
-    locationMatch.status === "partial-match"
-      ? locationMatch.detected
-      : undefined;
-  const hasVerifiedArea = Boolean(verifiedArea);
   const accuracyAcceptable =
-    currentPin?.accuracy === undefined || currentPin.accuracy <= 1000;
-  const needsFallbackConfirmation =
-    Boolean(currentPin) &&
-    (locationMatch.status === "incomplete" || Boolean(lookupError));
-  const confirmedFallback = needsFallbackConfirmation && fallbackConfirmed;
+    currentPin?.accuracy !== undefined &&
+    currentPin.accuracy <= MAX_SERVICE_LOCATION_ACCURACY_METERS;
+  const isInJones = isJonesIsabela(detectedAddress || {});
   const canContinue =
     Boolean(currentPin) &&
     Boolean(accuracyAcceptable) &&
-    (hasVerifiedArea || confirmedFallback);
+    isInJones;
   const checkCurrentLocation = async (location: PinnedLocation) => {
     setCurrentPin(location);
     setDetectedAddress(null);
     setLookupError("");
-    setFallbackConfirmed(false);
     setIsChecking(true);
     try {
       setDetectedAddress(await reverseGeocodePhilippineAddress(location));
@@ -1395,10 +1276,10 @@ function PatientLocationVerificationScreen({
     if (!currentPin || !canContinue) return;
     updatePatient(patient.id, {
       mobileLocationVerifiedAt: new Date().toISOString(),
-      mobileLocationBarangay: verifiedArea?.barangay || patient.barangay,
+      mobileLocationBarangay: detectedAddress?.barangay || patient.barangay,
       mobileLocationMunicipality:
-        verifiedArea?.municipality || patient.municipality,
-      mobileLocationProvince: verifiedArea?.province || patient.province,
+        detectedAddress?.municipality || patient.municipality,
+      mobileLocationProvince: detectedAddress?.province || patient.province,
       mobileLocationAccuracy: currentPin.accuracy,
       latitude: currentPin.latitude,
       longitude: currentPin.longitude,
@@ -1406,6 +1287,7 @@ function PatientLocationVerificationScreen({
       locationSource: "Current device location",
       locationVerified: true,
       locationVerifiedAt: new Date().toISOString(),
+      requiresInitialServiceLocation: false,
     });
     onVerified();
   };
@@ -1416,30 +1298,30 @@ function PatientLocationVerificationScreen({
           type="button"
           onClick={onBack}
           className="grid h-10 w-10 place-items-center rounded-xl bg-card/15 backdrop-blur"
-          aria-label="Back to home"
+          aria-label="Back to services"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-foreground/70">
-            SmartServe location check
+            Service location check
           </p>
           <h1 className="font-display text-2xl font-bold">
-            Verify your current barangay
+            Confirm your current location
           </h1>
         </div>
       </div>
       <div className="rounded-3xl bg-card p-5 text-card-foreground shadow-card">
         <div className="rounded-2xl border border-primary/20 bg-primary-soft/60 p-3 text-sm">
-          <p className="font-semibold text-primary">Why this is required</p>
+          <p className="font-semibold text-primary">Used for this booking</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            SmartServe compares your device location with your registered
-            residence before you use online services. This supports reliable,
-            barangay-level disease analysis.
+            Your exact device pin is collected after you choose a service. It
+            must be in Jones, Isabela and is used only for the clinic's
+            barangay-level disease-trend map.
           </p>
         </div>
         <div className="mt-4 rounded-xl bg-muted/60 p-3 text-xs">
-          <p className="font-semibold">Registered residence</p>
+          <p className="font-semibold">Registered address</p>
           <p className="mt-1 text-muted-foreground">
             {patient.barangay}, {patient.municipality}, {patient.province}
           </p>
@@ -1457,7 +1339,7 @@ function PatientLocationVerificationScreen({
         </div>
         {isChecking ? (
           <p className="mt-3 text-xs text-muted-foreground">
-            Checking your current barangay…
+            Checking your current location…
           </p>
         ) : null}
         {lookupError ? (
@@ -1467,64 +1349,32 @@ function PatientLocationVerificationScreen({
         ) : null}
         {currentPin && !accuracyAcceptable ? (
           <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Your GPS accuracy is ±{currentPin.accuracy} m. Move to a clearer
-            area and try again for a reliable barangay match.
+            Your GPS accuracy is ±{currentPin.accuracy} m. A pin within ±
+            {MAX_SERVICE_LOCATION_ACCURACY_METERS} m is required for reliable
+            disease-trend mapping. Move to a clearer area and try again.
           </p>
         ) : null}
-        {locationMatch.status === "partial-match" && accuracyAcceptable ? (
+        {detectedAddress && isInJones && accuracyAcceptable ? (
           <div className="mt-3 rounded-xl border border-primary/20 bg-primary-soft p-3 text-xs text-primary-foreground">
-            <p className="font-semibold">Current area verified</p>
+            <p className="font-semibold">Jones, Isabela location verified</p>
             <p className="mt-1">
-              The map service returned the available matching address details.
-              You may continue because none of them conflict with your registered
-              residence.
+              Detected area: {detectedAddress.barangay || "Local area not returned"}, {detectedAddress.municipality}, {detectedAddress.province}.
+              The exact pin will be saved for disease-trend mapping.
             </p>
           </div>
         ) : null}
-        {locationMatch.status === "incomplete" ? (
-          <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            SmartServe could not determine every address level from this device
-            location. This can happen when the map provider has incomplete local
-            data.
-          </p>
-        ) : null}
-        {locationMatch.status === "mismatched" ? (
+        {detectedAddress && !isInJones ? (
           <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
-            <p className="font-semibold">Location does not match your record.</p>
+            <p className="font-semibold">Location is outside Jones, Isabela.</p>
             <p className="mt-1">
-              Detected: {locationMatch.detected.barangay},{" "}
-              {locationMatch.detected.municipality},{" "}
-              {locationMatch.detected.province}
+              Detected: {detectedAddress.barangay || "Local area not returned"},{" "}
+              {detectedAddress.municipality || "Municipality not returned"},{" "}
+              {detectedAddress.province || "Province not returned"}
             </p>
             <p className="mt-2 text-muted-foreground">
-              Try again at your residence. If your registered address is wrong,
-              ask clinic staff to review it.
+              Use this service only while you are in Jones, Isabela.
             </p>
           </div>
-        ) : null}
-        {locationMatch.status === "matched" && accuracyAcceptable ? (
-          <div className="mt-3 rounded-xl border border-secondary/25 bg-secondary-soft p-3 text-xs text-secondary-foreground">
-            <p className="font-semibold">Barangay verified</p>
-            <p className="mt-1">
-              Your current location matches {patient.barangay},{" "}
-              {patient.municipality}.
-            </p>
-          </div>
-        ) : null}
-        {needsFallbackConfirmation && accuracyAcceptable ? (
-          <label className="mt-3 flex items-start gap-2 rounded-xl border border-primary/20 bg-primary-soft/60 p-3 text-xs text-foreground">
-            <input
-              type="checkbox"
-              checked={fallbackConfirmed}
-              onChange={(event) => setFallbackConfirmed(event.target.checked)}
-              className="mt-0.5"
-            />
-            <span>
-              I confirm that this current device location is within my registered
-              barangay: <strong>{patient.barangay}</strong>. SmartServe will save
-              this as a device-location verification with limited map detail.
-            </span>
-          </label>
         ) : null}
         <Button
           type="button"
@@ -1532,7 +1382,7 @@ function PatientLocationVerificationScreen({
           onClick={completeVerification}
           className="mt-5 h-11 w-full rounded-xl bg-gradient-primary"
         >
-          Continue to SmartServe services
+          Continue to appointment date
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>
         {!currentPin ? (
@@ -1541,7 +1391,7 @@ function PatientLocationVerificationScreen({
           </p>
         ) : !canContinue && accuracyAcceptable ? (
           <p className="mt-2 text-center text-[10px] text-muted-foreground">
-            Review the detected area or confirm the current barangay to continue.
+            Wait for a Jones, Isabela location to be detected before continuing.
           </p>
         ) : null}
       </div>
@@ -1825,6 +1675,7 @@ function ScheduleScreen({
   const svc = services.find((service) => service.id === serviceId) || {
     name: "Selected service",
   };
+  const hasCapturedServiceLocation = Boolean(patient.mobileLocationVerifiedAt);
   const today = new Date();
   const days = Array.from({ length: 14 }, (_, i) => {
     const d = new Date(today);
@@ -1895,15 +1746,19 @@ function ScheduleScreen({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase text-secondary">
-                Location verified
+                {hasCapturedServiceLocation
+                  ? "Booking location saved"
+                  : "Existing patient record"}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Your current device location matches your registered residence:
-                {" "}
-                {patient.barangay}, {patient.municipality}.
+                {hasCapturedServiceLocation
+                  ? `Your first service-selection location was saved for the disease-trend map: ${patient.mobileLocationBarangay || patient.barangay}, ${patient.mobileLocationMunicipality || patient.municipality}.`
+                  : "No new device location is requested for an existing patient record."}
               </p>
             </div>
-            <Badge className="border-0 bg-card text-secondary">Verified</Badge>
+            <Badge className="border-0 bg-card text-secondary">
+              {hasCapturedServiceLocation ? "Saved" : "Existing"}
+            </Badge>
           </div>
         </div>
 
