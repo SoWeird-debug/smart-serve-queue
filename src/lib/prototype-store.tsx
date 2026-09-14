@@ -184,6 +184,7 @@ type Store = {
     serviceId: string,
     queueNumber: string,
     reason: string,
+    expectedCareArea?: "General Clinic" | "Animal Bite Center",
   ) => boolean;
   callNext: (area?: "General Clinic" | "Animal Bite Center") => void;
   completeConsultation: (
@@ -339,6 +340,7 @@ const hydrate = (saved: Partial<ReturnType<typeof seed>>) => {
           (!appointment.room || appointment.room === "Super Health Center");
         return {
           ...appointment,
+          visitType: appointment.visitType || "Scheduled",
           queueArea,
           room: shouldCorrectLegacyAnimalBiteRoom
             ? buildingForCareArea(queueArea)
@@ -1084,6 +1086,7 @@ export function PrototypeStoreProvider({
               queueNumber: "",
               attendanceStatus: "Pending",
               queueStatus: "Scheduled",
+              visitType: "Scheduled",
               room: building,
               queueArea,
               createdAt,
@@ -1299,15 +1302,19 @@ export function PrototypeStoreProvider({
               null
           : null;
       },
-      addWalkIn: (patientId, serviceId, givenNumber, reason) => {
+      addWalkIn: (patientId, serviceId, givenNumber, reason, expectedCareArea) => {
         const queueNumber = givenNumber.trim().padStart(3, "0");
         const service = data.services.find((item) => item.id === serviceId);
+        const careArea = careAreaForService(service);
         if (
+          !data.patients.some((patient) => patient.id === patientId) ||
+          !service ||
+          (expectedCareArea && careArea !== expectedCareArea) ||
           !/^(0(0[1-9]|[1-9][0-9])|100)$/.test(queueNumber) ||
           data.appointments.some(
             (a) =>
               a.queueNumber === queueNumber &&
-              (a.queueArea || "General Clinic") === careAreaForService(service) &&
+              (a.queueArea || "General Clinic") === careArea &&
               !["Completed", "Consultation Completed", "No Show"].includes(
                 a.queueStatus,
               ),
@@ -1331,8 +1338,8 @@ export function PrototypeStoreProvider({
                 queueNumber,
                 attendanceStatus: "Present",
                 queueStatus: "Waiting for Triage",
-                room: service?.building || buildingForCareArea(careAreaForService(service)),
-                queueArea: careAreaForService(service),
+                room: service.building || buildingForCareArea(careArea),
+                queueArea: careArea,
                 createdAt: checkedInAt,
                 queueEnteredAt: checkedInAt,
                 visitType: "Walk-in",

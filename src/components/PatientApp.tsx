@@ -1796,6 +1796,11 @@ function ConfirmScreen({
   const svc = services.find((service) => service.id === serviceId) || {
     name: "Selected service",
   };
+  const appointmentBuilding =
+    svc.building ||
+    (svc.queueArea === "Animal Bite Center"
+      ? "Animal Bite Center building"
+      : "Super Health Center");
   return (
     <div className="p-6 pt-10 flex flex-col items-center text-center min-h-full bg-background">
       <div className="w-24 h-24 rounded-full bg-secondary-soft flex items-center justify-center mb-4 animate-pop-in">
@@ -1841,7 +1846,7 @@ function ConfirmScreen({
       <div className="w-full mt-5 bg-card border border-border rounded-2xl p-4 text-left text-xs space-y-2">
         <div className="flex gap-2">
           <MapPin className="w-4 h-4 text-primary shrink-0" />
-          <span>Super Health Center, Jones, Isabela</span>
+          <span>{appointmentBuilding}, Jones, Isabela</span>
         </div>
         <div className="flex gap-2">
           <MapPin className="w-4 h-4 text-secondary shrink-0" />

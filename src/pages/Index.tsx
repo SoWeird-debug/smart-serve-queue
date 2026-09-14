@@ -27,6 +27,14 @@ const workspaceLabel: Record<Workspace, string> = {
   admin: "Administration",
 };
 
+const workspaceLabelForUser = (
+  workspace: Workspace,
+  user: StaffUser | null,
+) => {
+  if (workspace !== "staff") return workspaceLabel[workspace];
+  return user?.role === "Nurse / Triage" ? "Nurse / triage" : "Front desk";
+};
+
 const Index = () => {
   const displayMode = new URLSearchParams(window.location.search).get("display");
   const isAnimalBiteQueueDisplay = window.location.pathname === "/animal-bite-queue";
@@ -63,7 +71,7 @@ const Index = () => {
             </div>
             <div>
               <h1 className="font-display text-lg font-bold leading-none">SmartServe</h1>
-              <p className="mt-1 text-xs text-muted-foreground">{workspaceLabel[workspace]}{signedInUser ? ` · ${signedInUser.fullName}` : ""}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{workspaceLabelForUser(workspace, signedInUser)}{signedInUser ? ` · ${signedInUser.fullName}` : ""}</p>
             </div>
           </div>
           <Button size="sm" variant="outline" onClick={returnToAccess}>

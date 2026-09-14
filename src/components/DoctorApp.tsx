@@ -22,6 +22,7 @@ import {
   type DoctorAvailability,
   type StaffUser,
 } from "@/lib/prototype-store";
+import { publishPublicQueueArea } from "@/components/StaffApp";
 
 type PrescriptionDraft = MedicalRecord["prescription"][number];
 
@@ -46,6 +47,11 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
     : "General Clinic";
   const [careArea, setCareArea] = useState<"General Clinic" | "Animal Bite Center">(assignedCareArea);
   useEffect(() => setCareArea(assignedCareArea), [assignedCareArea]);
+  useEffect(() => {
+    void publishPublicQueueArea(appointments, assignedCareArea).catch(
+      () => undefined,
+    );
+  }, [appointments, assignedCareArea]);
   const ready = appointments.filter(
     (appointment) =>
       (appointment.queueArea || "General Clinic") === careArea &&

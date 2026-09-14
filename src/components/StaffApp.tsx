@@ -4,7 +4,6 @@ import {
   ClipboardPlus,
   Clock,
   MapPin,
-  MonitorPlay,
   Phone,
   Search,
   UserCheck,
@@ -27,8 +26,8 @@ import { calculateAge } from "@/lib/patient-age";
 import { reverseGeocodePhilippineAddress } from "@/lib/location-address";
 import { appointmentPriority, orderDoctorQueue } from "@/lib/queue-priority";
 
-type Tab = "board" | "checkin" | "intake" | "queue";
-type CareArea = "General Clinic" | "Animal Bite Center";
+type FrontDeskTab = "checkin" | "intake" | "queue";
+export type CareArea = "General Clinic" | "Animal Bite Center";
 export type QueueDisplayAppointment = Pick<
   Appointment,
   | "id"
@@ -47,9 +46,14 @@ export type QueueDisplayState = {
 
 export const createPublicQueueSnapshot = (
   appointments: Appointment[],
+  area?: CareArea,
 ): QueueDisplayState => ({
   appointments: appointments
-    .filter((appointment) => Boolean(appointment.queueNumber))
+    .filter(
+      (appointment) =>
+        Boolean(appointment.queueNumber) &&
+        (!area || (appointment.queueArea || "General Clinic") === area),
+    )
     .map(
       ({
         id,
@@ -73,6 +77,20 @@ export const createPublicQueueSnapshot = (
     ),
   updatedAt: new Date().toISOString(),
 });
+
+// Each care area publishes only its own queue. This stops a General Clinic
+// workspace from replacing the Animal Bite TV feed (and vice versa).
+export const publishPublicQueueArea = (
+  appointments: Appointment[],
+  area: CareArea,
+) => {
+  const snapshot = createPublicQueueSnapshot(appointments, area);
+  return fetch("/api/queue-display", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...snapshot, area }),
+  });
+};
 const label = (patients: Patient[], id: string) =>
   patients.find((p) => p.id === id)?.fullName || "Unknown patient";
 const normalizePatientIdentity = (value: string) =>
@@ -111,8 +129,7 @@ async function searchAddressCandidates(
 }
 
 export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
-  const [tab, setTab] = useState<Tab>("board");
-  const [now, setNow] = useState(new Date());
+  const [tab, setTab] = useState<FrontDeskTab>("checkin");
   const store = usePrototypeStore();
   const staffUser = currentUser ? store.staffUsers.find((user) => user.id === currentUser.id) : undefined;
   // A staff account has one clinic assignment. Legacy accounts tagged for Animal Bite
@@ -121,27 +138,20 @@ export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
     ? "Animal Bite Center"
     : "General Clinic";
   const isAnimalBiteWorkspace = careArea === "Animal Bite Center";
+  const isNurseTriage = staffUser?.role === "Nurse / Triage";
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  useEffect(() => {
-    const payload = createPublicQueueSnapshot(store.appointments);
-    void fetch("/api/queue-display", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).catch(() => undefined);
-  }, [store.appointments]);
-  const tabs = [
-    { id: "board" as Tab, label: isAnimalBiteWorkspace ? "Animal Bite TV Board" : "TV Queue Board", icon: MonitorPlay },
-    { id: "checkin" as Tab, label: isAnimalBiteWorkspace ? "Bite Patient Check-in" : "Scheduled Check-in", icon: UserCheck },
+    void publishPublicQueueArea(store.appointments, careArea).catch(
+      () => undefined,
+    );
+  }, [store.appointments, careArea]);
+  const frontDeskTabs = [
+    { id: "checkin" as FrontDeskTab, label: isAnimalBiteWorkspace ? "Bite Patient Check-in" : "Scheduled Check-in", icon: UserCheck },
     {
-      id: "intake" as Tab,
-      label: isAnimalBiteWorkspace ? "Bite Assessment" : "Onsite Intake & Triage",
-      icon: ClipboardPlus,
+      id: "intake" as FrontDeskTab,
+      label: "Register / verify & walk-in",
+      icon: UserPlus,
     },
-    { id: "queue" as Tab, label: isAnimalBiteWorkspace ? "Animal Bite Queue" : "Queue Control", icon: Activity },
+    { id: "queue" as FrontDeskTab, label: isAnimalBiteWorkspace ? "Animal Bite Queue" : "Queue Control", icon: Activity },
   ];
   return (
     <div className="space-y-6">
@@ -150,53 +160,68 @@ export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
           variant="secondary"
           className="mb-2 bg-secondary-soft text-secondary border-0"
         >
-          {isAnimalBiteWorkspace ? "Animal Bite Center staff workspace" : "SmartServe General Clinic staff workspace"} · local prototype
+          {isAnimalBiteWorkspace ? "Animal Bite Center" : "SmartServe General Clinic"} · {isNurseTriage ? "Nurse / Triage workspace" : "Front desk workspace"} · local prototype
         </Badge>
         <h2 className="text-2xl md:text-3xl font-display font-bold">
-          {isAnimalBiteWorkspace ? "Animal Bite assessment before doctor handoff" : "One secure intake flow for booked and walk-in patients"}
+          {isNurseTriage
+            ? isAnimalBiteWorkspace
+              ? "Animal Bite assessment before doctor handoff"
+              : "Patient assessment before doctor handoff"
+            : isAnimalBiteWorkspace
+              ? "Animal Bite patient intake and queue"
+              : "General Clinic patient intake and queue"}
         </h2>
         <p className="text-muted-foreground text-sm mt-1">
-          {isAnimalBiteWorkspace
-            ? "Only Animal Bite Center patients appear here. Record the bite assessment before sending a patient to the Animal Bite doctor queue."
-            : "Only SmartServe General Clinic services appear here. Staff handle names privately while the TV shows queue numbers only."}
+          {isNurseTriage
+            ? isAnimalBiteWorkspace
+              ? "Only Animal Bite Center patients appear here. Complete the required bite assessment before doctor handoff."
+              : "Only General Clinic patients awaiting triage appear here. Record the assessment before doctor handoff."
+            : isAnimalBiteWorkspace
+              ? "Check in, register or verify, add Animal Bite walk-ins, and manage only the Animal Bite queue."
+              : "Check in, register or verify, add General Clinic walk-ins, and manage only the General Clinic queue."}
         </p>
       </div>
-      <div className="flex justify-center">
-        <div className="inline-flex flex-wrap justify-center p-1 bg-muted rounded-2xl">
-          {tabs.map((t) => {
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium",
-                  tab === t.id
-                    ? "bg-card text-primary shadow-soft"
-                    : "text-muted-foreground",
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      {tab === "board" && <Board appts={store.appointments} now={now} area={careArea} />}
-      {tab === "checkin" && (
-        <Checkin
-          appts={store.appointments}
-          patients={store.patients}
-          services={store.services}
-          checkIn={store.checkIn}
-          markAbsent={store.markAbsent}
-          area={careArea}
-        />
-      )}
-      {tab === "intake" && <OnsiteIntake services={store.services} area={careArea} />}
-      {tab === "queue" && (
-        <Queue appts={store.appointments} patients={store.patients} call={store.callNext} absent={store.markAbsent} area={careArea} />
+      {isNurseTriage ? (
+        <TriageForm area={careArea} />
+      ) : (
+        <>
+          <div className="flex justify-center">
+            <div className="inline-flex flex-wrap justify-center p-1 bg-muted rounded-2xl">
+              {frontDeskTabs.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setTab(item.id)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium",
+                      tab === item.id
+                        ? "bg-card text-primary shadow-soft"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {tab === "checkin" && (
+            <Checkin
+              appts={store.appointments}
+              patients={store.patients}
+              services={store.services}
+              checkIn={store.checkIn}
+              markAbsent={store.markAbsent}
+              area={careArea}
+            />
+          )}
+          {tab === "intake" && <FrontDeskIntake services={store.services} area={careArea} />}
+          {tab === "queue" && (
+            <Queue appts={store.appointments} patients={store.patients} call={store.callNext} absent={store.markAbsent} area={careArea} />
+          )}
+        </>
       )}
     </div>
   );
@@ -234,7 +259,9 @@ function Board({
 }) {
   const areaAppointments = appts.filter((appointment) => (appointment.queueArea || "General Clinic") === area);
   const called = appts.filter(
-    (appointment) => (appointment.queueArea || "General Clinic") === area && appointment.queueStatus === "Called",
+    (appointment) =>
+      (appointment.queueArea || "General Clinic") === area &&
+      ["Called", "In Consultation"].includes(appointment.queueStatus),
   );
   const triageWaiting = areaAppointments
     .filter((appointment) => appointment.queueStatus === "Waiting for Triage")
@@ -378,7 +405,17 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
 function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) {
   const [numbers, setNumbers] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
-  const scheduled = appts.filter((a: Appointment) => a.visitType !== "Walk-in" && (a.queueArea || "General Clinic") === area);
+  const scheduled = appts.filter((appointment: Appointment) => {
+    const service = services.find(
+      (item: Service) => item.id === appointment.serviceId,
+    );
+    const appointmentArea = service?.queueArea || appointment.queueArea || "General Clinic";
+    return (
+      appointment.visitType === "Scheduled" &&
+      appointment.queueStatus === "Scheduled" &&
+      appointmentArea === area
+    );
+  });
   return (
     <div className="bg-card border border-border rounded-2xl shadow-card overflow-hidden max-w-5xl mx-auto">
       <div className="p-5 border-b border-border">
@@ -440,29 +477,28 @@ function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) 
           </Button>
         </div>
       ))}
+      {!scheduled.length ? (
+        <p className="p-5 text-sm text-muted-foreground">
+          No scheduled {area === "Animal Bite Center" ? "Animal Bite" : "General Clinic"} appointments are awaiting check-in.
+        </p>
+      ) : null}
     </div>
   );
 }
 
-function OnsiteIntake({ services, area }: { services: Service[]; area: CareArea }) {
-  const [mode, setMode] = useState<"triage" | "register" | "walkin">("triage");
+function FrontDeskIntake({ services, area }: { services: Service[]; area: CareArea }) {
+  const [mode, setMode] = useState<"register" | "walkin">("register");
+  const [newlyRegisteredPatientId, setNewlyRegisteredPatientId] = useState("");
   const isAnimalBiteWorkspace = area === "Animal Bite Center";
   const areaServices = services.filter((service) => (service.queueArea || "General Clinic") === area);
   return (
     <div className="max-w-5xl mx-auto">
-      <div className="grid md:grid-cols-3 gap-3 mb-5">
-        <Action
-          active={mode === "triage"}
-          icon={ClipboardPlus}
-          title={isAnimalBiteWorkspace ? "Bite assessment & doctor handoff" : "Vitals & send to doctor"}
-          description={isAnimalBiteWorkspace ? "Complete the required bite assessment before doctor handoff." : "Complete triage for an active patient."}
-          onClick={() => setMode("triage")}
-        />
+      <div className="grid md:grid-cols-2 gap-3 mb-5">
         <Action
           active={mode === "register"}
           icon={UserPlus}
-          title={isAnimalBiteWorkspace ? "Register / verify patient" : "Register new patient"}
-          description="Create or confirm the permanent patient record."
+          title="Register / verify patient"
+          description="Create or find the shared permanent patient record."
           onClick={() => setMode("register")}
         />
         <Action
@@ -473,11 +509,21 @@ function OnsiteIntake({ services, area }: { services: Service[]; area: CareArea 
           onClick={() => setMode("walkin")}
         />
       </div>
-      {mode === "triage" && <TriageForm area={area} />}
       {mode === "register" && (
-        <RegistrationForm onRegistered={() => setMode("walkin")} />
+        <RegistrationForm
+          onRegistered={(patientId) => {
+            setNewlyRegisteredPatientId(patientId);
+            setMode("walkin");
+          }}
+        />
       )}{" "}
-      {mode === "walkin" && <WalkInForm services={areaServices} />}
+      {mode === "walkin" && (
+        <WalkInForm
+          services={areaServices}
+          area={area}
+          initialPatientId={newlyRegisteredPatientId}
+        />
+      )}
     </div>
   );
 }
@@ -544,7 +590,7 @@ function RegistrationTextInput({
   );
 }
 
-function RegistrationForm({ onRegistered }: { onRegistered: () => void }) {
+function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) => void }) {
   const { patients, registerPatient } = usePrototypeStore();
   const [form, setForm] = useState({
     givenName: "",
@@ -806,7 +852,7 @@ function RegistrationForm({ onRegistered }: { onRegistered: () => void }) {
       );
       return;
     }
-    registerPatient({
+    const patient = registerPatient({
       ...form,
       fullName,
       address,
@@ -819,7 +865,7 @@ function RegistrationForm({ onRegistered }: { onRegistered: () => void }) {
         ? new Date().toISOString()
         : undefined,
     });
-    onRegistered();
+    onRegistered(patient.id);
   };
   const identityFields = [
     ["familyName", "Last / family name", true, "family-name"],
@@ -1256,14 +1302,33 @@ function RegistrationForm({ onRegistered }: { onRegistered: () => void }) {
   );
 }
 
-function WalkInForm({ services }: { services: Service[] }) {
+function WalkInForm({
+  services,
+  area,
+  initialPatientId,
+}: {
+  services: Service[];
+  area: CareArea;
+  initialPatientId?: string;
+}) {
   const { patients, addWalkIn } = usePrototypeStore();
   const [query, setQuery] = useState("");
   const [patientId, setPatientId] = useState("");
-  const [serviceId, setServiceId] = useState("s1");
+  const [serviceId, setServiceId] = useState(() => services[0]?.id || "");
   const [number, setNumber] = useState("");
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
+  useEffect(() => {
+    if (!services.some((service) => service.id === serviceId)) {
+      setServiceId(services[0]?.id || "");
+    }
+  }, [services, serviceId]);
+  useEffect(() => {
+    const patient = patients.find((item) => item.id === initialPatientId);
+    if (!patient) return;
+    setPatientId(patient.id);
+    setQuery(`${patient.fullName} · ${patient.patientNumber || ""}`);
+  }, [initialPatientId, patients]);
   const matches = useMemo(
     () =>
       patients
@@ -1278,11 +1343,12 @@ function WalkInForm({ services }: { services: Service[] }) {
   return (
     <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
       <h3 className="font-display font-bold text-lg">
-        Add registered walk-in visit
+        {area === "Animal Bite Center" ? "Add Animal Bite walk-in visit" : "Add registered walk-in visit"}
       </h3>
       <p className="text-sm text-muted-foreground mb-5">
-        Search first to prevent duplicate registrations. This creates today’s
-        visit and places the patient in the triage queue.
+        {area === "Animal Bite Center"
+          ? "This creates an Animal Bite Center visit and places the patient in its bite-assessment queue."
+          : "Search first to prevent duplicate registrations. This creates today’s visit and places the patient in the triage queue."}
       </p>
       <Label>
         Search patient by name, patient ID, mobile number, or birth date
@@ -1360,12 +1426,12 @@ function WalkInForm({ services }: { services: Service[] }) {
         />
       </div>
       <Button
-        disabled={!patientId || !number || !reason}
+        disabled={!patientId || !serviceId || !number || !reason}
         onClick={() =>
           setMessage(
-            addWalkIn(patientId, serviceId, number, reason)
-              ? "Walk-in saved. Patient is now waiting for triage."
-              : "Queue number must be 001–100 and cannot be active already.",
+            addWalkIn(patientId, serviceId, number, reason, area)
+              ? `${area === "Animal Bite Center" ? "Animal Bite" : "Walk-in"} visit saved. Patient is now waiting for triage.`
+              : "Use an available queue number from 001–100 for this clinic.",
           )
         }
         className="mt-5"

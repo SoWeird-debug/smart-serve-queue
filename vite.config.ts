@@ -9,7 +9,7 @@ import { componentTagger } from "lovable-tagger";
 type PublicQueueItem = {
   id: string;
   queueNumber: string;
-  queueStatus: "Waiting for Triage" | "Waiting for Doctor" | "Called";
+  queueStatus: "Waiting for Triage" | "Waiting for Doctor" | "Called" | "In Consultation";
   room: string;
   queueArea: "General Clinic" | "Animal Bite Center";
   triagePriority: "Normal" | "Priority" | "Urgent" | "Emergency";
@@ -29,6 +29,7 @@ const queueStatuses = new Set<PublicQueueItem["queueStatus"]>([
   "Waiting for Triage",
   "Waiting for Doctor",
   "Called",
+  "In Consultation",
 ]);
 const queuePriorities = new Set<PublicQueueItem["triagePriority"]>([
   "Normal",
@@ -55,7 +56,10 @@ const readJsonBody = (request: IncomingMessage) =>
     });
     request.on("error", reject);
   });
-const sanitizeQueueState = (input: unknown): PublicQueueState => {
+const sanitizeQueueState = (
+  input: unknown,
+  area?: PublicQueueItem["queueArea"],
+): PublicQueueState => {
   const source = input as { appointments?: unknown };
   const appointments = Array.isArray(source?.appointments)
     ? source.appointments
@@ -73,9 +77,9 @@ const sanitizeQueueState = (input: unknown): PublicQueueState => {
           )
             return null;
           const priority = String(item.triagePriority || "Normal") as PublicQueueItem["triagePriority"];
-          const queueArea = item.queueArea === "Animal Bite Center"
+          const queueArea = area || (item.queueArea === "Animal Bite Center"
             ? "Animal Bite Center"
-            : "General Clinic";
+            : "General Clinic");
           return {
             id: String(item.id).slice(0, 128),
             queueNumber: number.padStart(3, "0"),
@@ -92,6 +96,8 @@ const sanitizeQueueState = (input: unknown): PublicQueueState => {
     : [];
   return { appointments, updatedAt: new Date().toISOString() };
 };
+const isQueueArea = (value: unknown): value is PublicQueueItem["queueArea"] =>
+  value === "General Clinic" || value === "Animal Bite Center";
 const lanIpv4Addresses = () =>
   Object.values(networkInterfaces())
     .flat()
@@ -126,7 +132,22 @@ function localQueueDisplay(): Plugin {
           return;
         }
         try {
-          publicQueueState = sanitizeQueueState(await readJsonBody(request));
+          const payload = await readJsonBody(request) as { area?: unknown };
+          if (!isQueueArea(payload.area)) {
+            sendJson(response, { error: "A valid queue area is required." }, 400);
+            return;
+          }
+          const publishedArea = payload.area;
+          const areaState = sanitizeQueueState(payload, publishedArea);
+          publicQueueState = {
+            appointments: [
+              ...publicQueueState.appointments.filter(
+                (appointment) => appointment.queueArea !== publishedArea,
+              ),
+              ...areaState.appointments,
+            ],
+            updatedAt: areaState.updatedAt,
+          };
           response.statusCode = 204;
           response.end();
         } catch {
