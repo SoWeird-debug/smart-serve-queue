@@ -27,6 +27,9 @@ export interface Service {
   capacity: number; // per day
   icon: string; // lucide icon name
   color: string; // semantic token name
+  queueArea?: "General Clinic" | "Animal Bite Center";
+  followUpEligible?: boolean;
+  building?: string;
 }
 
 export interface Patient {
@@ -100,6 +103,11 @@ export interface Appointment {
   triagePriority?: TriagePriority;
   visitType?: "Scheduled" | "Walk-in";
   visitReason?: string;
+  queueArea?: "General Clinic" | "Animal Bite Center";
+  parentAppointmentId?: string;
+  followUpType?: string;
+  followUpReason?: string;
+  followUpNumber?: number;
 }
 
 export type TriagePriority = "Normal" | "Priority" | "Urgent" | "Emergency";
@@ -136,6 +144,8 @@ export interface MedicineItem {
   batch: string;
   supplier?: string;
   deliveryReference?: string;
+  inventoryArea?: "General Pharmacy" | "Animal Bite Center";
+  category?: "Medicine" | "Vaccine" | "Immunoglobulin" | "Supply";
 }
 
 export interface PrescriptionItem {
@@ -158,6 +168,11 @@ export interface MedicalRecord {
   prescription: PrescriptionItem[];
   status:
     "Prescribed" | "Ready for pickup" | "Partially dispensed" | "Dispensed";
+  appointmentId?: string;
+  parentConsultationId?: string;
+  careArea?: "General Clinic" | "Animal Bite Center";
+  followUpNumber?: number;
+  followUpPlan?: { date: string; type: string; reason: string; building: string };
 }
 
 export interface NotificationItem {
@@ -216,6 +231,9 @@ export const services: Service[] = [
     capacity: 20,
     icon: "ShieldPlus",
     color: "warning",
+    queueArea: "Animal Bite Center",
+    followUpEligible: true,
+    building: "Animal Bite Center building",
   },
   {
     id: "s3",
@@ -664,6 +682,30 @@ export const medicines: MedicineItem[] = [
     reorderLevel: 200,
     expiry: "2027-02-28",
     batch: "ORS-2408",
+  },
+  {
+    id: "ab-v1",
+    name: "Rabies vaccine",
+    strength: "0.5 mL",
+    form: "Vial",
+    stock: 80,
+    reorderLevel: 20,
+    expiry: "2027-08-31",
+    batch: "RAB-2501",
+    inventoryArea: "Animal Bite Center",
+    category: "Vaccine",
+  },
+  {
+    id: "ab-v2",
+    name: "Tetanus toxoid",
+    strength: "0.5 mL",
+    form: "Vial",
+    stock: 45,
+    reorderLevel: 15,
+    expiry: "2027-03-31",
+    batch: "TT-2502",
+    inventoryArea: "Animal Bite Center",
+    category: "Vaccine",
   },
 ];
 

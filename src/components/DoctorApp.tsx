@@ -30,6 +30,7 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
     appointments,
     patients,
     medicines,
+    services,
     consultationTemplates,
     medicalRecords,
     triage,
@@ -40,9 +41,16 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
   const currentDoctor = currentUser
     ? staffUsers.find((user) => user.id === currentUser.id)
     : undefined;
+  const assignedCareArea: "General Clinic" | "Animal Bite Center" = currentDoctor?.assignedAreas?.includes("Animal Bite Center")
+    ? "Animal Bite Center"
+    : "General Clinic";
+  const [careArea, setCareArea] = useState<"General Clinic" | "Animal Bite Center">(assignedCareArea);
+  useEffect(() => setCareArea(assignedCareArea), [assignedCareArea]);
   const ready = appointments.filter(
     (appointment) =>
+      (appointment.queueArea || "General Clinic") === careArea &&
       appointment.queueStatus === "Called" ||
+      (appointment.queueArea || "General Clinic") === careArea &&
       appointment.queueStatus === "In Consultation",
   );
   const [id, setId] = useState("");
@@ -61,9 +69,12 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
   const [notes, setNotes] = useState(
     "Advise rest, fluids, and return if symptoms worsen.",
   );
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [followUpType, setFollowUpType] = useState("Follow-up check-up");
+  const [followUpReason, setFollowUpReason] = useState("");
   const availableMedicines = useMemo(
-    () => medicines.filter((medicine) => medicine.stock > 0),
-    [medicines],
+    () => medicines.filter((medicine) => medicine.stock > 0 && (careArea === "Animal Bite Center" ? medicine.inventoryArea === "Animal Bite Center" : medicine.inventoryArea !== "Animal Bite Center")),
+    [medicines, careArea],
   );
   const filteredMedicines = useMemo(() => {
     const query = medicineQuery.trim().toLowerCase();
@@ -118,6 +129,9 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
     ? medicalRecords.filter((record) => record.patientId === patient.id)
     : [];
   const medicine = availableMedicines.find((item) => item.id === medicineId);
+  const followUpEnabled = Boolean(
+    appointment && services.find((service) => service.id === appointment.serviceId)?.followUpEligible,
+  );
 
   const selectMedicine = (selectedId: string) => {
     setMedicineId(selectedId);
@@ -175,6 +189,9 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
       notes.trim(),
       prescription,
       currentDoctor.id,
+      followUpDate
+        ? { date: followUpDate, type: followUpType, reason: followUpReason }
+        : undefined,
     );
   };
 
@@ -223,6 +240,11 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
           </select>
         </div>
       ) : null}
+      <div className="mx-auto flex max-w-2xl gap-2 rounded-2xl bg-muted p-1">
+        {[assignedCareArea].map((area) => (
+          <Button key={area} type="button" variant={careArea === area ? "default" : "ghost"} className="flex-1" onClick={() => setCareArea(area)}>{area}</Button>
+        ))}
+      </div>
       <div className="grid lg:grid-cols-[280px,1fr] gap-5">
         <aside className="bg-card border border-border rounded-2xl p-4 shadow-soft">
           <div className="flex items-center gap-2 mb-4">
@@ -290,6 +312,13 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                     value={triageRecord?.bloodPressure || "Not recorded"}
                   />
                 </div>
+                {triageRecord?.animalExposure ? (
+                  <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm">
+                    <p className="font-semibold">Animal Bite assessment</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{triageRecord.animalExposure.animal} · {triageRecord.animalExposure.exposure} · {triageRecord.animalExposure.woundSite || "wound site not recorded"} · {triageRecord.animalExposure.animalStatus}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">First aid: {triageRecord.animalExposure.firstAid || "not recorded"}</p>
+                  </div>
+                ) : null}
               </section>
               <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
                 <div className="flex items-center gap-2 mb-4">
@@ -598,6 +627,16 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                   onChange={(event) => setNotes(event.target.value)}
                   className="mt-1 min-h-24"
                 />
+                {followUpEnabled ? <div className="mt-4 rounded-xl border border-primary/15 bg-primary-soft/40 p-3">
+                  <p className="text-sm font-semibold">Doctor follow-up plan</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Creates a linked follow-up appointment and patient alert. Animal Bite visits stay in the Animal Bite Center queue.</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div><Label>Follow-up date</Label><Input className="mt-1" type="date" value={followUpDate} onChange={(event) => setFollowUpDate(event.target.value)} /></div>
+                    <div><Label>Session type</Label><Input className="mt-1" value={followUpType} onChange={(event) => setFollowUpType(event.target.value)} placeholder="Vaccine dose / wound review" /></div>
+                  </div>
+                  <Label className="mt-3 block">Clinical reason</Label>
+                  <Input className="mt-1" value={followUpReason} onChange={(event) => setFollowUpReason(event.target.value)} placeholder="Doctor's follow-up instruction" />
+                </div> : null}
                 <Button
                   disabled={!diagnosis.trim() || currentDoctor?.role !== "Doctor"}
                   onClick={complete}
@@ -620,6 +659,9 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                       {record.date} · {record.clinician} · {record.status}
                     </p>
                     <p className="text-sm mt-2">{record.notes}</p>
+                    {record.followUpPlan ? (
+                      <p className="mt-2 rounded-lg bg-primary-soft px-3 py-2 text-xs text-primary">Next follow-up: {record.followUpPlan.type} on {record.followUpPlan.date} · {record.followUpPlan.reason || "Doctor review"}</p>
+                    ) : null}
                     {record.prescription.length ? (
                       <p className="mt-2 text-xs text-muted-foreground">
                         Clinic medicines:{" "}

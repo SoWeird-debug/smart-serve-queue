@@ -13,15 +13,12 @@ import {
   Package,
   Pencil,
   Plus,
-  Radio,
-  RefreshCw,
   Settings,
   ShieldCheck,
   Stethoscope,
   Trash2,
   TrendingUp,
   Tv,
-  Unplug,
   Upload,
   UserCog,
   UserPlus,
@@ -1995,6 +1992,8 @@ function ServicePage({ services, add, update, remove }: any) {
     description: "",
     duration: "20",
     capacity: "20",
+    queueArea: "General Clinic",
+    followUpEligible: false,
   });
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<any>(null);
@@ -2010,7 +2009,7 @@ function ServicePage({ services, add, update, remove }: any) {
         color: "primary",
       })
     ) {
-      setForm({ name: "", description: "", duration: "20", capacity: "20" });
+      setForm({ name: "", description: "", duration: "20", capacity: "20", queueArea: "General Clinic", followUpEligible: false });
       setCreating(false);
     }
   };
@@ -2031,6 +2030,8 @@ function ServicePage({ services, add, update, remove }: any) {
         value={form.name}
         onChange={(v: string) => setForm({ ...form, name: v })}
       />
+      <div><Label>Queue building</Label><select value={form.queueArea} onChange={(event) => setForm({ ...form, queueArea: event.target.value })} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>General Clinic</option><option>Animal Bite Center</option></select></div>
+      <label className="mt-6 flex items-center gap-2 text-sm"><input type="checkbox" checked={form.followUpEligible} onChange={(event) => setForm({ ...form, followUpEligible: event.target.checked })} />Follow-up check-up applicable</label>
       <Field
         label="Description"
         value={form.description}
@@ -2146,6 +2147,8 @@ function ServicePage({ services, add, update, remove }: any) {
                       setEditing({ ...editing, name: v })
                     }
                   />
+                  <div><Label>Queue building</Label><select value={editing.queueArea || "General Clinic"} onChange={(event) => setEditing({ ...editing, queueArea: event.target.value })} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>General Clinic</option><option>Animal Bite Center</option></select></div>
+                  <label className="mt-6 flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(editing.followUpEligible)} onChange={(event) => setEditing({ ...editing, followUpEligible: event.target.checked })} />Follow-up check-up applicable</label>
                   <Field
                     label="Description"
                     value={editing.description}
@@ -2196,6 +2199,7 @@ function ServicePage({ services, add, update, remove }: any) {
                       </p>
                     </div>
                   </div>
+                  <p className="text-sm text-muted-foreground">Queue: {viewing.queueArea || "General Clinic"} · Follow-up: {viewing.followUpEligible ? "Applicable" : "Not configured"}</p>
                 </div>
               )}
             </div>
@@ -2629,6 +2633,7 @@ type AccountForm = {
   mobile: string;
   title: string;
   notes: string;
+  assignedAreas: ("General Clinic" | "Animal Bite Center")[];
 };
 
 const blankAccountForm = (): AccountForm => ({
@@ -2642,6 +2647,7 @@ const blankAccountForm = (): AccountForm => ({
   mobile: "",
   title: "Clinic Administrator",
   notes: "",
+  assignedAreas: ["General Clinic"],
 });
 const staffRoles: StaffRole[] = ["Front desk", "Nurse / Triage", "Pharmacy"];
 const doctorStatuses: DoctorAvailability[] = [
@@ -2698,6 +2704,7 @@ function StaffPage({
       mobile: user.mobile || "",
       title: user.title || "Clinic Administrator",
       notes: user.notes || "",
+      assignedAreas: user.assignedAreas || ["General Clinic"],
     });
     setError("");
   };
@@ -2731,6 +2738,7 @@ function StaffPage({
         mobile: selected.role === "Administrator" ? form.mobile : undefined,
         title: selected.role === "Administrator" ? form.title : undefined,
         notes: selected.role === "Administrator" ? form.notes : undefined,
+        assignedAreas: form.assignedAreas,
       });
       if (!updated) {
         setError("That username is already in use. Choose another username.");
@@ -2757,6 +2765,7 @@ function StaffPage({
       mobile: role === "Administrator" ? form.mobile : undefined,
       title: role === "Administrator" ? form.title : undefined,
       notes: role === "Administrator" ? form.notes : undefined,
+      assignedAreas: form.assignedAreas,
     });
     if (!created) {
       setError("That username is already in use. Choose another username.");
@@ -2823,6 +2832,7 @@ function StaffPage({
             user.active ? "Account active" : "Account disabled",
             user.role === "Doctor" ? `Patient view: ${doctorAvailabilityLabel(user.doctorStatus)}` : "",
             user.role === "Administrator" && user.recoveryEmail ? user.recoveryEmail : "",
+            `Assignment: ${user.assignedAreas?.includes("Animal Bite Center") ? "Animal Bite Center" : "General Clinic"}`,
           ].filter(Boolean).join(" · ");
           return (
             <Row
@@ -2884,6 +2894,13 @@ function StaffPage({
                     <p className="mt-1 text-xs text-muted-foreground">Patients see a privacy-safe availability message, not leave reasons.</p>
                   </div>
                 ) : null}
+                {!isAdmin ? (
+                  <div className="rounded-xl border border-warning/20 bg-warning/10 px-3 py-3 text-sm">
+                    <Label htmlFor="clinic-assignment">Clinic assignment</Label>
+                    <select id="clinic-assignment" value={form.assignedAreas.includes("Animal Bite Center") ? "Animal Bite Center" : "General Clinic"} onChange={(event) => setForm({ ...form, assignedAreas: [event.target.value as "General Clinic" | "Animal Bite Center"] })} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>General Clinic</option><option>Animal Bite Center</option></select>
+                    <p className="mt-2 text-xs text-muted-foreground">Staff and triage accounts use only the workspace and queue for this assigned care area. Animal Bite assessments are required before doctor handoff.</p>
+                  </div>
+                ) : null}
                 {isAdmin ? (
                   <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
                     <Field label="Title / position" value={form.title} onChange={(title: string) => setForm({ ...form, title })} />
@@ -2935,113 +2952,31 @@ type CastTarget = {
   id: string;
   label: string;
   description: string;
-  visibility: "Public-safe" | "Private clinical";
 };
 
 const castTargets: CastTarget[] = [
   {
     id: "queue-tv",
-    label: "Queue Board",
-    description: "TV board that shows queue numbers only.",
-    visibility: "Public-safe",
+    label: "SmartServe Queue Board",
+    description: "Public TV board for General Clinic queue numbers only.",
   },
   {
-    id: "patient-mobile",
-    label: "Patient Portal",
-    description: "Patient sign-in and online-services experience.",
-    visibility: "Private clinical",
-  },
-  {
-    id: "staff-queue",
-    label: "Front Desk & Queue",
-    description: "Check-in, onsite intake, triage, and queue control.",
-    visibility: "Private clinical",
-  },
-  {
-    id: "doctor-consultation",
-    label: "Doctor Consultation",
-    description: "Clinical notes, diagnoses, and medicine selection.",
-    visibility: "Private clinical",
-  },
-  {
-    id: "pharmacy-inventory",
-    label: "Pharmacy Inventory",
-    description: "Medicine stock and dispensing workspace.",
-    visibility: "Private clinical",
-  },
-  {
-    id: "admin-dashboard",
-    label: "Admin Dashboard",
-    description: "Administrative reports and protected clinic records.",
-    visibility: "Private clinical",
-  },
-  {
-    id: "disease-trends",
-    label: "Disease Trends",
-    description: "Aggregated disease-monitoring visualization.",
-    visibility: "Private clinical",
+    id: "animal-bite-queue-tv",
+    label: "Animal Bite Queue Board",
+    description: "Public TV board for Animal Bite Center queue numbers only.",
   },
 ];
 
-type LanCastDevice = {
-  id: string;
-  displayName: string;
-  model: string;
-  address: string;
-  port: number;
-  host: string;
-};
-type CastDiscoveryResponse = {
-  devices: LanCastDevice[];
-  scannedAt: string;
-  hint: string;
-};
-type ActiveCast = {
-  workspaceId: string;
-  workspaceLabel: string;
-  deviceName: string;
-  startedAt: string;
-};
-
 function CastCenter() {
   const [selectedId, setSelectedId] = useState("queue-tv");
-  const [privateDisplayConfirmed, setPrivateDisplayConfirmed] = useState(false);
-  const [status, setStatus] = useState("Choose a workspace, then open the Chromecast device picker.");
-  const [devices, setDevices] = useState<LanCastDevice[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState("");
-  const [discoveryMessage, setDiscoveryMessage] = useState("Scanning the local network for Chromecast devices…");
-  const [isScanning, setIsScanning] = useState(true);
-  const [activeCast, setActiveCast] = useState<ActiveCast | null>(null);
   const [smartTvUrls, setSmartTvUrls] = useState<string[]>([]);
   const [smartTvMessage, setSmartTvMessage] = useState("Preparing a local Smart TV display link…");
   const selected = castTargets.find((target) => target.id === selectedId) || castTargets[0];
-  const selectedDevice = devices.find((device) => device.id === selectedDeviceId);
-  const isPrivate = selected.visibility === "Private clinical";
-  const receiverAppId = (import.meta.env.VITE_GOOGLE_CAST_APP_ID as string | undefined)?.trim();
-  const scanLocalNetwork = useCallback(async () => {
-    setIsScanning(true);
-    setDiscoveryMessage("Scanning this computer’s local network for Chromecast devices…");
-    try {
-      const response = await fetch("/api/cast/discover", {
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) throw new Error("Local discovery endpoint is unavailable");
-      const result = (await response.json()) as CastDiscoveryResponse;
-      setDevices(result.devices || []);
-      setSelectedDeviceId((current) =>
-        result.devices.some((device) => device.id === current)
-          ? current
-          : result.devices[0]?.id || "",
-      );
-      setDiscoveryMessage(result.hint || "Local network scan completed.");
-    } catch {
-      setDevices([]);
-      setSelectedDeviceId("");
-      setDiscoveryMessage("Local device discovery is available only while SmartServe runs through its local development server. Start it with npm run dev, then scan again.");
-    } finally {
-      setIsScanning(false);
-    }
-  }, []);
+  const smartTvUrl = smartTvUrls[0]
+    ? selected.id === "animal-bite-queue-tv"
+      ? `${smartTvUrls[0].replace(/\/\?.*$/, "")}/animal-bite-queue`
+      : smartTvUrls[0]
+    : "";
   const loadSmartTvLinks = useCallback(async () => {
     try {
       const response = await fetch("/api/smart-tv-link", {
@@ -3063,82 +2998,22 @@ function CastCenter() {
   }, []);
 
   useEffect(() => {
-    void scanLocalNetwork();
     void loadSmartTvLinks();
-  }, [loadSmartTvLinks, scanLocalNetwork]);
-
-  const requestDevice = async () => {
-    if (isPrivate && !privateDisplayConfirmed) {
-      setStatus("Confirm that this is a private display before selecting a device.");
-      return;
-    }
-    if (!receiverAppId) {
-      setStatus(`${selectedDevice ? `${selectedDevice.displayName} is selected from your LAN scan. ` : ""}Chromecast receiver is not configured. Add VITE_GOOGLE_CAST_APP_ID after registering a SmartServe Google Cast Receiver, then use an HTTPS deployment.`);
-      return;
-    }
-    const cast = (window as typeof window & { chrome?: any }).chrome?.cast;
-    const castContext = cast?.framework?.CastContext?.getInstance?.();
-    if (!castContext) {
-      setStatus("Google Cast is not available in this browser. Open this HTTPS app in Chrome with the Google Cast Sender SDK configured.");
-      return;
-    }
-    try {
-      castContext.setOptions({
-        receiverApplicationId: receiverAppId,
-        autoJoinPolicy: cast.AutoJoinPolicy?.ORIGIN_SCOPED,
-      });
-      setStatus(`${selectedDevice ? `${selectedDevice.displayName} is selected from the LAN scan. ` : ""}Opening Chrome’s device picker—choose the same device to confirm the cast session…`);
-      const session = await castContext.requestSession();
-      await session.sendMessage("urn:x-cast:smartserve.ui", {
-        targetId: selected.id,
-        label: selected.label,
-      });
-      const receiverName =
-        session.getCastDevice?.()?.friendlyName ||
-        selectedDevice?.displayName ||
-        "the selected receiver";
-      setActiveCast({
-        workspaceId: selected.id,
-        workspaceLabel: selected.label,
-        deviceName: receiverName,
-        startedAt: new Date().toISOString(),
-      });
-      setStatus(`${selected.label} is now casted on ${receiverName}.`);
-    } catch {
-      setStatus("Casting was not started. The device picker may have been closed, or the custom receiver is not ready.");
-    }
-  };
-  const disconnectCast = async () => {
-    const cast = (window as typeof window & { chrome?: any }).chrome?.cast;
-    const castContext = cast?.framework?.CastContext?.getInstance?.();
-    const session = castContext?.getCurrentSession?.();
-    if (!session) {
-      setActiveCast(null);
-      setStatus("There is no active Chromecast session to disconnect.");
-      return;
-    }
-    try {
-      await session.endSession(true);
-      setStatus(`${activeCast?.workspaceLabel || "The workspace"} was disconnected from ${activeCast?.deviceName || "the Chromecast device"}.`);
-      setActiveCast(null);
-    } catch {
-      setStatus("SmartServe could not disconnect the Cast session. Check the receiver and try again.");
-    }
-  };
+  }, [loadSmartTvLinks]);
 
   return (
     <>
-      <Head title="Cast Center" sub="Choose a registered SmartServe workspace and send it to an approved Chromecast display." />
+      <Head title="Queue Display Center" sub="Choose the public queue board to open in the TV browser." />
       <div className="grid gap-5 xl:grid-cols-[1.2fr,.8fr]">
-        <Panel title="Registered castable workspaces">
+        <Panel title="Public queue boards">
           <div className="grid gap-3 sm:grid-cols-2">
             {castTargets.map((target) => {
               const active = selectedId === target.id;
               return (
                 <button key={target.id} type="button" onClick={() => setSelectedId(target.id)} className={`rounded-2xl border p-4 text-left transition-smooth ${active ? "border-primary bg-primary-soft shadow-soft" : "border-border bg-card hover:border-primary/40"}`}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="grid h-9 w-9 place-items-center rounded-xl bg-background text-primary"><Cast className="h-4 w-4" /></div>
-                    <Badge className={target.visibility === "Public-safe" ? "border-0 bg-secondary-soft text-secondary" : "border-0 bg-muted text-muted-foreground"}>{target.visibility}</Badge>
+                    <div className="grid h-9 w-9 place-items-center rounded-xl bg-background text-primary"><Tv className="h-4 w-4" /></div>
+                    <Badge className="border-0 bg-secondary-soft text-secondary">Public-safe</Badge>
                   </div>
                   <p className="mt-3 font-semibold">{target.label}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{target.description}</p>
@@ -3149,117 +3024,28 @@ function CastCenter() {
           </div>
         </Panel>
         <div className="space-y-5">
-          <Panel title="Smart TV display link">
+          <Panel title="Open on the TV browser">
             <div className="rounded-2xl border border-secondary/20 bg-secondary-soft p-4">
               <div className="flex items-start gap-3">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-card text-secondary shadow-soft"><Tv className="h-5 w-5" /></span>
                 <div>
-                  <p className="text-sm font-semibold">No Chromecast receiver needed</p>
+                  <p className="text-sm font-semibold">Use the TV browser</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">Use the TV’s built-in browser while it is on the same clinic network. The page receives only public queue numbers, rooms, and queue states from the local staff workspace.</p>
                 </div>
               </div>
-              {smartTvUrls[0] ? (
+              {smartTvUrl ? (
                 <>
-                  <code className="mt-4 block break-all rounded-xl bg-card/80 px-3 py-2 text-xs text-primary">{smartTvUrls[0]}</code>
+                  <code className="mt-4 block break-all rounded-xl bg-card/80 px-3 py-2 text-xs text-primary">{smartTvUrl}</code>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(smartTvUrls[0]).then(() => setSmartTvMessage("Smart TV link copied. Open it in the TV browser.")).catch(() => setSmartTvMessage("Copy was blocked by this browser. Enter the displayed address manually on the TV."))}>
+                    <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(smartTvUrl).then(() => setSmartTvMessage("Smart TV link copied. Open it in the TV browser.")).catch(() => setSmartTvMessage("Copy was blocked by this browser. Enter the displayed address manually on the TV."))}>
                       <Copy className="mr-2 h-4 w-4" />Copy TV link
                     </Button>
-                    <a href={smartTvUrls[0]} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">Preview queue board</a>
+                    <a href={smartTvUrl} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">Preview queue board</a>
                   </div>
                 </>
               ) : null}
             </div>
             <p role="status" className="mt-3 text-xs leading-5 text-muted-foreground">{smartTvMessage}</p>
-          </Panel>
-          <Panel
-            title="Chromecast devices on this LAN"
-            action={
-              <Button size="sm" variant="outline" onClick={() => void scanLocalNetwork()} disabled={isScanning}>
-                <RefreshCw className={`mr-2 h-4 w-4 ${isScanning ? "animate-spin" : ""}`} />
-                {isScanning ? "Scanning" : "Scan network"}
-              </Button>
-            }
-          >
-            {devices.length ? (
-              <div className="space-y-2">
-                {devices.map((device) => {
-                  const active = device.id === selectedDeviceId;
-                  return (
-                    <button
-                      key={device.id}
-                      type="button"
-                      onClick={() => setSelectedDeviceId(device.id)}
-                      className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition-smooth ${active ? "border-primary bg-primary-soft" : "border-border hover:border-primary/40"}`}
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-muted text-primary"><Radio className="h-4 w-4" /></span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-semibold">{device.displayName}</span>
-                          <span className="block truncate text-[11px] text-muted-foreground">{device.model} · {device.address}:{device.port}</span>
-                        </span>
-                      </span>
-                      {active ? <Badge className="border-0 bg-primary text-primary-foreground">Selected</Badge> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4 text-center">
-                <Radio className={`mx-auto h-5 w-5 text-primary ${isScanning ? "animate-pulse" : ""}`} />
-                <p className="mt-2 text-sm font-medium">{isScanning ? "Looking for devices…" : "No Chromecast found"}</p>
-              </div>
-            )}
-            <p role="status" className="mt-3 text-xs leading-5 text-muted-foreground">{discoveryMessage}</p>
-          </Panel>
-          <Panel title="Cast session status">
-            {activeCast ? (
-              <div className="rounded-2xl border border-secondary/25 bg-secondary-soft p-4">
-                <div className="flex items-start gap-3">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-card text-secondary shadow-soft"><Cast className="h-5 w-5" /></span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-[.12em] text-secondary">Casting now</p>
-                    <p className="mt-1 text-sm font-semibold">{activeCast.workspaceLabel}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Casted on {activeCast.deviceName} · started {new Date(activeCast.startedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}</p>
-                  </div>
-                </div>
-                <Button variant="outline" className="mt-4 w-full border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => void disconnectCast()}>
-                  <Unplug className="mr-2 h-4 w-4" />
-                  Disconnect from {activeCast.deviceName}
-                </Button>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-4 text-center">
-                <Cast className="mx-auto h-5 w-5 text-muted-foreground" />
-                <p className="mt-2 text-sm font-medium">No active cast session</p>
-                <p className="mt-1 text-xs text-muted-foreground">After you confirm a receiver, this card will identify the casted workspace and device.</p>
-              </div>
-            )}
-          </Panel>
-          <Panel title="Send to Chromecast">
-            <div className="rounded-2xl border border-primary/15 bg-primary-soft/60 p-4">
-              <p className="text-xs font-semibold text-primary">Selected workspace</p>
-              <p className="mt-1 font-display text-xl font-bold">{selected.label}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{selected.description}</p>
-              <p className="mt-3 font-mono text-[10px] text-primary">{selected.id}</p>
-            </div>
-            {isPrivate ? (
-              <label className="mt-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-                <input type="checkbox" checked={privateDisplayConfirmed} onChange={(event) => setPrivateDisplayConfirmed(event.target.checked)} className="mt-0.5" />
-                <span><strong>Private display confirmed.</strong> This screen may contain protected clinic or patient information. Do not cast it to a public waiting area.</span>
-              </label>
-            ) : (
-              <div className="mt-4 rounded-xl border border-secondary/20 bg-secondary-soft p-3 text-xs text-secondary-foreground">This is the only public-safe target. It displays queue numbers, never patient names.</div>
-            )}
-            <Button className="mt-4 w-full" onClick={requestDevice}>
-              <Cast className="mr-2 h-4 w-4" />
-              Confirm cast device
-            </Button>
-            <p role="status" className="mt-3 text-xs text-muted-foreground">{status}</p>
-          </Panel>
-          <Panel title="Deployment requirement">
-            <p className="text-xs leading-5 text-muted-foreground">The rendered list is discovered by this computer’s local SmartServe server through mDNS. Chrome still requires its approved device picker to create the cast session. To render a SmartServe view, production also needs a registered custom Google Cast Receiver ID and an HTTPS-hosted receiver app.</p>
-            <p className={`mt-3 rounded-xl px-3 py-2 text-xs ${receiverAppId ? "bg-secondary-soft text-secondary-foreground" : "bg-muted text-muted-foreground"}`}>{receiverAppId ? "Receiver ID detected for this build." : "No receiver ID is configured in this local build yet."}</p>
           </Panel>
         </div>
       </div>
@@ -3282,6 +3068,8 @@ const csvValue = (value: string | number) =>
 
 function MedicinePage({ medicines, audit, add, update, remove }: any) {
   const [name, setName] = useState("");
+  const [inventoryArea, setInventoryArea] = useState("General Pharmacy");
+  const [category, setCategory] = useState("Medicine");
   const [historyOpen, setHistoryOpen] = useState(false);
   if (historyOpen)
     return (
@@ -3309,6 +3097,8 @@ function MedicinePage({ medicines, audit, add, update, remove }: any) {
                   reorderLevel: 0,
                   expiry: "Not set",
                   batch: "Not set",
+                  inventoryArea,
+                  category,
                 });
                 setName("");
               }}
@@ -3332,13 +3122,17 @@ function MedicinePage({ medicines, audit, add, update, remove }: any) {
         placeholder="New medicine name"
         className="mb-4"
       />
+      <div className="mb-4 grid gap-3 sm:grid-cols-2">
+        <select aria-label="Inventory location" value={inventoryArea} onChange={(event) => setInventoryArea(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm"><option>General Pharmacy</option><option>Animal Bite Center</option></select>
+        <select aria-label="Inventory category" value={category} onChange={(event) => setCategory(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm"><option>Medicine</option><option>Vaccine</option><option>Immunoglobulin</option><option>Supply</option></select>
+      </div>
       <Panel title="Medicine items">
         {medicines.map((m: any) => (
           <Row
             key={m.id}
             title={`${m.name} ${m.strength}`}
-            detail={`${m.form} · ${m.stock} in stock · Batch ${m.batch}`}
-            badge="Medicine"
+            detail={`${m.form} · ${m.stock} in stock · Batch ${m.batch} · ${m.inventoryArea || "General Pharmacy"}`}
+            badge={m.category || "Medicine"}
             actions={
               <>
                 <Button

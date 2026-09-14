@@ -29,6 +29,7 @@ const workspaceLabel: Record<Workspace, string> = {
 
 const Index = () => {
   const displayMode = new URLSearchParams(window.location.search).get("display");
+  const isAnimalBiteQueueDisplay = window.location.pathname === "/animal-bite-queue";
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [signedInUser, setSignedInUser] = useState<StaffUser | null>(null);
   const enterStaffWorkspace = (user: StaffUser) => {
@@ -40,6 +41,7 @@ const Index = () => {
     setWorkspace(null);
   };
 
+  if (isAnimalBiteQueueDisplay) return <QueueTvDisplay area="Animal Bite Center" />;
   if (displayMode === "queue-tv") return <QueueTvDisplay />;
 
   if (!workspace) {
@@ -72,7 +74,7 @@ const Index = () => {
       </header>
       <main className="container animate-fade-in py-8 md:py-12" key={workspace}>
         {workspace === "patient" ? <PatientApp /> : null}
-        {workspace === "staff" ? <StaffApp /> : null}
+        {workspace === "staff" ? <StaffApp currentUser={signedInUser || undefined} /> : null}
         {workspace === "doctor" ? <DoctorApp currentUser={signedInUser || undefined} /> : null}
         {workspace === "pharmacy" ? <PharmacyApp /> : null}
         {workspace === "admin" ? <AdminApp /> : null}

@@ -64,16 +64,22 @@ const iconMap = {
 };
 const rememberedSessionKey = "smartserve-patient-remembered-session";
 const rememberedMobileKey = "smartserve-patient-remembered-mobile";
-const MAX_SERVICE_LOCATION_ACCURACY_METERS = 200;
+// The browser reports geolocation accuracy in metres. A one-kilometre
+// fallback keeps rural users with weak GPS coverage from being blocked.
+const MAX_SERVICE_LOCATION_ACCURACY_METERS = 1_000;
 
 const normalizeAreaName = (value?: string) =>
   value?.trim().toLocaleLowerCase("en-PH").replace(/[^a-z0-9]/g, "") || "";
-const isJonesIsabela = (area: {
+const isSupportedServiceArea = (area: {
   municipality?: string;
   province?: string;
-}) =>
-  normalizeAreaName(area.municipality) === "jones" &&
-  normalizeAreaName(area.province) === "isabela";
+}) => {
+  const municipality = normalizeAreaName(area.municipality);
+  return (
+    ["jones", "santiago", "santiagocity"].includes(municipality) &&
+    normalizeAreaName(area.province) === "isabela"
+  );
+};
 
 type Screen =
   | "login"
@@ -746,8 +752,8 @@ function OnlineRegistrationWizard({
         !form.postalCode)
     )
       return "Complete your mobile number and full residence address.";
-    if (step === 2 && !isJonesIsabela(form))
-      return "Online registration is available only to residents of Jones, Isabela.";
+    if (step === 2 && !isSupportedServiceArea(form))
+      return "Online registration is available only to residents of Jones or Santiago City, Isabela.";
     if (
       step === 3 &&
       ((form.philHealthClientType !== "Not enrolled" && !form.philHealthPin) ||
@@ -1039,8 +1045,9 @@ function OnlineRegistrationWizard({
               }
             />
             <p className="rounded-xl border border-primary/15 bg-primary-soft px-3 py-2 text-[11px] text-primary">
-              Online registration serves all barangays in Jones, Isabela. Your
-              current location is requested only when you select a service.
+              Online registration serves all barangays in Jones and Santiago
+              City, Isabela. Your current location is requested only when you
+              select a service.
             </p>
           </div>
         ) : step === 3 ? (
@@ -1252,11 +1259,11 @@ function PatientLocationVerificationScreen({
   const accuracyAcceptable =
     currentPin?.accuracy !== undefined &&
     currentPin.accuracy <= MAX_SERVICE_LOCATION_ACCURACY_METERS;
-  const isInJones = isJonesIsabela(detectedAddress || {});
+  const isInServiceArea = isSupportedServiceArea(detectedAddress || {});
   const canContinue =
     Boolean(currentPin) &&
     Boolean(accuracyAcceptable) &&
-    isInJones;
+    isInServiceArea;
   const checkCurrentLocation = async (location: PinnedLocation) => {
     setCurrentPin(location);
     setDetectedAddress(null);
@@ -1316,7 +1323,7 @@ function PatientLocationVerificationScreen({
           <p className="font-semibold text-primary">Used for this booking</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Your exact device pin is collected after you choose a service. It
-            must be in Jones, Isabela and is used only for the clinic's
+            must be in Jones or Santiago City, Isabela and is used only for the clinic's
             barangay-level disease-trend map.
           </p>
         </div>
@@ -1349,30 +1356,30 @@ function PatientLocationVerificationScreen({
         ) : null}
         {currentPin && !accuracyAcceptable ? (
           <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Your GPS accuracy is ±{currentPin.accuracy} m. A pin within ±
-            {MAX_SERVICE_LOCATION_ACCURACY_METERS} m is required for reliable
-            disease-trend mapping. Move to a clearer area and try again.
+            Your GPS accuracy is ±{currentPin.accuracy} m. A pin within ±1 km
+            is required for disease-trend mapping. Move to a clearer area and
+            try again.
           </p>
         ) : null}
-        {detectedAddress && isInJones && accuracyAcceptable ? (
+        {detectedAddress && isInServiceArea && accuracyAcceptable ? (
           <div className="mt-3 rounded-xl border border-primary/20 bg-primary-soft p-3 text-xs text-primary-foreground">
-            <p className="font-semibold">Jones, Isabela location verified</p>
+            <p className="font-semibold">Service-area location verified</p>
             <p className="mt-1">
               Detected area: {detectedAddress.barangay || "Local area not returned"}, {detectedAddress.municipality}, {detectedAddress.province}.
               The exact pin will be saved for disease-trend mapping.
             </p>
           </div>
         ) : null}
-        {detectedAddress && !isInJones ? (
+        {detectedAddress && !isInServiceArea ? (
           <div className="mt-3 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
-            <p className="font-semibold">Location is outside Jones, Isabela.</p>
+            <p className="font-semibold">Location is outside the service area.</p>
             <p className="mt-1">
               Detected: {detectedAddress.barangay || "Local area not returned"},{" "}
               {detectedAddress.municipality || "Municipality not returned"},{" "}
               {detectedAddress.province || "Province not returned"}
             </p>
             <p className="mt-2 text-muted-foreground">
-              Use this service only while you are in Jones, Isabela.
+              Use this service only while you are in Jones or Santiago City, Isabela.
             </p>
           </div>
         ) : null}
@@ -1391,7 +1398,7 @@ function PatientLocationVerificationScreen({
           </p>
         ) : !canContinue && accuracyAcceptable ? (
           <p className="mt-2 text-center text-[10px] text-muted-foreground">
-            Wait for a Jones, Isabela location to be detected before continuing.
+            Wait for a Jones or Santiago City, Isabela location to be detected before continuing.
           </p>
         ) : null}
       </div>
@@ -1920,6 +1927,12 @@ function MyAppointmentsScreen({
                     ? "Arrived"
                     : a.queueStatus}
               </p>
+              <p className="mt-1 text-xs font-medium text-primary">
+                {a.queueArea || "General Clinic"} · {a.room || "Super Health Center"}
+              </p>
+              {a.followUpType ? (
+                <p className="mt-1 text-xs text-secondary">Follow-up: {a.followUpType}</p>
+              ) : null}
               {a.attendanceStatus === "Present" && (
                 <p className="text-xs text-primary mt-2">
                   Queue {a.queueNumber} ·{" "}
@@ -2366,6 +2379,13 @@ function NotifScreen({
           <p className="rounded-xl bg-muted/60 p-4 text-sm leading-6 text-foreground">
             {selectedNotification?.message}
           </p>
+          {selectedNotification?.message.includes("Animal Bite Center") ? (
+            <div className="rounded-xl border border-primary/15 bg-primary-soft/50 p-3 text-sm">
+              <p className="font-semibold">Animal Bite Center building</p>
+              <p className="mt-1 text-xs text-muted-foreground">Use the building location shown in your appointment details when you arrive.</p>
+              <a className="mt-2 inline-block text-xs font-semibold text-primary underline" href="https://www.google.com/maps/search/?api=1&query=Animal+Bite+Center+Jones+Isabela" target="_blank" rel="noreferrer">Open directions</a>
+            </div>
+          ) : null}
           <DialogFooter>
             <Button
               type="button"

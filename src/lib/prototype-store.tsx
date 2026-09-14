@@ -22,6 +22,13 @@ export type TriageRecord = {
   allergies: string;
   complaint: string;
   completedAt: string;
+  animalExposure?: {
+    animal: string;
+    exposure: string;
+    woundSite: string;
+    animalStatus: string;
+    firstAid: string;
+  };
 };
 export type AuditEvent = {
   id: string;
@@ -74,6 +81,7 @@ export type StaffUser = {
   mobile?: string;
   title?: string;
   notes?: string;
+  assignedAreas?: ("General Clinic" | "Animal Bite Center")[];
 };
 export type BarangayDirectoryEntry = {
   id: string;
@@ -163,7 +171,7 @@ type Store = {
   notifications: PatientNotification[];
   checkIn: (id: string, queueNumber: string) => boolean;
   markAbsent: (id: string) => void;
-  completeTriage: (record: Omit<TriageRecord, "completedAt">) => void;
+  completeTriage: (record: Omit<TriageRecord, "completedAt">) => boolean;
   importMigration: (rows: MigrationRow[]) => ImportSummary;
   registerPatient: (input: RegistrationInput) => Patient;
   registerPortalPatient: (
@@ -177,13 +185,14 @@ type Store = {
     queueNumber: string,
     reason: string,
   ) => boolean;
-  callNext: () => void;
+  callNext: (area?: "General Clinic" | "Animal Bite Center") => void;
   completeConsultation: (
     id: string,
     diagnosis: string,
     notes: string,
     prescription: MedicalRecord["prescription"],
     doctorId: string,
+    followUp?: { date: string; type: string; reason: string },
   ) => void;
   updatePatient: (id: string, patch: Partial<Patient>) => void;
   deletePatient: (id: string) => void;
@@ -269,15 +278,27 @@ const mergeSeedServices = (savedServices: Service[]) => {
       const replacement = seedServices.find(
         (seedService) => seedService.id === service.id,
       );
-      return replacement && legacyNames[service.id] === service.name
+      const isAnimalBite =
+        service.id === "s9" || normalizeHeader(service.name) === "animalbite";
+      const withSeedMetadata = replacement
         ? {
             ...service,
+            queueArea: isAnimalBite
+              ? "Animal Bite Center"
+              : service.queueArea || replacement.queueArea,
+            followUpEligible: service.followUpEligible ?? replacement.followUpEligible,
+            building: service.building || replacement.building,
+          }
+        : service;
+      return replacement && legacyNames[service.id] === service.name
+        ? {
+            ...withSeedMetadata,
             name: replacement.name,
             description: replacement.description,
             icon: replacement.icon,
             color: replacement.color,
           }
-        : service;
+        : withSeedMetadata;
     },
   );
   const currentIds = new Set(migrated.map((service) => service.id));
@@ -286,6 +307,12 @@ const mergeSeedServices = (savedServices: Service[]) => {
     ...seedServices.filter((service) => !currentIds.has(service.id)),
   ];
 };
+const careAreaForService = (service?: Service): "General Clinic" | "Animal Bite Center" =>
+  service?.id === "s9" || normalizeHeader(service?.name || "") === "animalbite"
+    ? "Animal Bite Center"
+    : service?.queueArea || "General Clinic";
+const buildingForCareArea = (area: "General Clinic" | "Animal Bite Center") =>
+  area === "Animal Bite Center" ? "Animal Bite Center building" : "Super Health Center";
 const legacyAvailabilityToDoctorStatus = (value: unknown): DoctorAvailability => {
   switch (value) {
     case "On leave":
@@ -299,13 +326,34 @@ const legacyAvailabilityToDoctorStatus = (value: unknown): DoctorAvailability =>
       return "Available";
   }
 };
-const hydrate = (saved: Partial<ReturnType<typeof seed>>) => ({
-  ...seed(),
-  ...saved,
-  notifications: Array.isArray(saved.notifications) ? saved.notifications : [],
-  barangays: Array.isArray(saved.barangays) ? saved.barangays : [],
-  staffUsers: Array.isArray(saved.staffUsers)
-    ? saved.staffUsers.map((savedUser) => {
+const hydrate = (saved: Partial<ReturnType<typeof seed>>) => {
+  const services = mergeSeedServices(saved.services || []);
+  const appointments = Array.isArray(saved.appointments)
+    ? saved.appointments.map((appointment) => {
+        const service = services.find((item) => item.id === appointment.serviceId);
+        const queueArea = service
+          ? careAreaForService(service)
+          : appointment.queueArea || "General Clinic";
+        const shouldCorrectLegacyAnimalBiteRoom =
+          queueArea === "Animal Bite Center" &&
+          (!appointment.room || appointment.room === "Super Health Center");
+        return {
+          ...appointment,
+          queueArea,
+          room: shouldCorrectLegacyAnimalBiteRoom
+            ? buildingForCareArea(queueArea)
+            : appointment.room,
+        };
+      })
+    : [];
+  return {
+    ...seed(),
+    ...saved,
+    appointments,
+    notifications: Array.isArray(saved.notifications) ? saved.notifications : [],
+    barangays: Array.isArray(saved.barangays) ? saved.barangays : [],
+    staffUsers: Array.isArray(saved.staffUsers)
+      ? saved.staffUsers.map((savedUser) => {
         const legacy = savedUser as StaffUser & { availability?: unknown; availabilityNote?: string };
         return {
           ...legacy,
@@ -317,10 +365,11 @@ const hydrate = (saved: Partial<ReturnType<typeof seed>>) => ({
               : undefined,
           notes: legacy.notes || legacy.availabilityNote || undefined,
         };
-      })
-    : [],
-  services: mergeSeedServices(saved.services || []),
-});
+        })
+      : [],
+    services,
+  };
+};
 
 export function PrototypeStoreProvider({
   children,
@@ -1019,9 +1068,10 @@ export function PrototypeStoreProvider({
       },
       bookAppointment: (patientId, serviceId, date) => {
         const createdAt = now();
-        const serviceName =
-          data.services.find((service) => service.id === serviceId)?.name ||
-          "clinic service";
+        const service = data.services.find((item) => item.id === serviceId);
+        const serviceName = service?.name || "clinic service";
+        const queueArea = careAreaForService(service);
+        const building = service?.building || buildingForCareArea(queueArea);
         change("Patient", "Created booking", serviceId, (d) => ({
           ...d,
           appointments: [
@@ -1034,7 +1084,8 @@ export function PrototypeStoreProvider({
               queueNumber: "",
               attendanceStatus: "Pending",
               queueStatus: "Scheduled",
-              room: "To be assigned",
+              room: building,
+              queueArea,
               createdAt,
             },
             ...d.appointments,
@@ -1044,7 +1095,7 @@ export function PrototypeStoreProvider({
               id: crypto.randomUUID(),
               patientId,
               title: "Booking received",
-              message: `Your ${serviceName} booking for ${date} was recorded. Please wait for clinic confirmation and check in on your appointment date.`,
+              message: `Your ${serviceName} booking for ${date} was recorded. Check in at ${building} on your appointment date.`,
               createdAt,
               read: false,
               type: "update",
@@ -1091,12 +1142,18 @@ export function PrototypeStoreProvider({
         })),
       checkIn: (id, givenNumber) => {
         const queueNumber = givenNumber.replace(/\D/g, "").padStart(3, "0");
+        const appointmentToCheckIn = data.appointments.find((appointment) => appointment.id === id);
+        const appointmentService = data.services.find(
+          (service) => service.id === appointmentToCheckIn?.serviceId,
+        );
+        const queueArea = careAreaForService(appointmentService);
         if (
           !/^(0(0[1-9]|[1-9][0-9])|100)$/.test(queueNumber) ||
           data.appointments.some(
             (a) =>
               a.id !== id &&
               a.queueNumber === queueNumber &&
+              (a.queueArea || "General Clinic") === queueArea &&
               !["Completed", "Consultation Completed", "No Show"].includes(
                 a.queueStatus,
               ),
@@ -1118,6 +1175,8 @@ export function PrototypeStoreProvider({
                     queueStatus: "Waiting for Triage",
                     queueNumber,
                     queueEnteredAt: checkedInAt,
+                    queueArea,
+                    room: appointmentService?.building || buildingForCareArea(queueArea),
                   }
                 : a,
             ),
@@ -1242,11 +1301,13 @@ export function PrototypeStoreProvider({
       },
       addWalkIn: (patientId, serviceId, givenNumber, reason) => {
         const queueNumber = givenNumber.trim().padStart(3, "0");
+        const service = data.services.find((item) => item.id === serviceId);
         if (
           !/^(0(0[1-9]|[1-9][0-9])|100)$/.test(queueNumber) ||
           data.appointments.some(
             (a) =>
               a.queueNumber === queueNumber &&
+              (a.queueArea || "General Clinic") === careAreaForService(service) &&
               !["Completed", "Consultation Completed", "No Show"].includes(
                 a.queueStatus,
               ),
@@ -1270,7 +1331,8 @@ export function PrototypeStoreProvider({
                 queueNumber,
                 attendanceStatus: "Present",
                 queueStatus: "Waiting for Triage",
-                room: "To be assigned",
+                room: service?.building || buildingForCareArea(careAreaForService(service)),
+                queueArea: careAreaForService(service),
                 createdAt: checkedInAt,
                 queueEnteredAt: checkedInAt,
                 visitType: "Walk-in",
@@ -1292,6 +1354,18 @@ export function PrototypeStoreProvider({
           ),
         })),
       completeTriage: (record) => {
+        const appointment = data.appointments.find((item) => item.id === record.appointmentId);
+        const appointmentService = data.services.find(
+          (service) => service.id === appointment?.serviceId,
+        );
+        const queueArea = careAreaForService(appointmentService);
+        const requiresAnimalAssessment = queueArea === "Animal Bite Center";
+        const exposure = record.animalExposure;
+        if (
+          requiresAnimalAssessment &&
+          (!exposure?.animal.trim() || !exposure.exposure.trim() || !exposure.woundSite.trim() || !exposure.animalStatus.trim() || !exposure.firstAid.trim())
+        )
+          return false;
         const triagedAt = now();
         change(
           "Nurse / triage",
@@ -1313,6 +1387,8 @@ export function PrototypeStoreProvider({
                     ...a,
                     triagePriority: record.priority,
                     triagedAt,
+                    queueArea,
+                    room: appointmentService?.building || buildingForCareArea(queueArea),
                     queueStatus:
                       record.priority === "Emergency"
                         ? "In Consultation"
@@ -1322,17 +1398,20 @@ export function PrototypeStoreProvider({
             ),
           }),
         );
+        return true;
       },
-      callNext: () => {
+      callNext: (area = "General Clinic") => {
         if (
           data.appointments.some(
             (appointment) =>
+              (appointment.queueArea || "General Clinic") === area &&
               appointment.queueStatus === "Called" ||
+              (appointment.queueArea || "General Clinic") === area &&
               appointment.queueStatus === "In Consultation",
           )
         )
           return;
-        const next = orderDoctorQueue(data.appointments)[0];
+        const next = orderDoctorQueue(data.appointments.filter((appointment) => (appointment.queueArea || "General Clinic") === area))[0];
         if (!next) return;
         change(
           "Queue staff",
@@ -1360,7 +1439,7 @@ export function PrototypeStoreProvider({
           }),
         );
       },
-      completeConsultation: (id, diagnosis, notes, prescription, doctorId) => {
+      completeConsultation: (id, diagnosis, notes, prescription, doctorId, followUp) => {
         const clinician = data.staffUsers.find(
           (user) =>
             user.id === doctorId && user.role === "Doctor" && user.active,
@@ -1397,17 +1476,39 @@ export function PrototypeStoreProvider({
           (d) => {
             const appointment = d.appointments.find((a) => a.id === id);
             if (!appointment) return d;
-            return {
-              ...d,
-              appointments: d.appointments.map((a) =>
-                a.id === id
-                  ? { ...a, queueStatus: "Consultation Completed" }
-                  : a,
-              ),
-              medicalRecords: [
-                {
+            const recordId = crypto.randomUUID();
+            const followUpAppointment = followUp?.date
+              ? {
                   id: crypto.randomUUID(),
                   patientId: appointment.patientId,
+                  serviceId: appointment.serviceId,
+                  date: followUp.date,
+                  timeSlot: "Doctor follow-up",
+                  queueNumber: "",
+                  attendanceStatus: "Pending" as const,
+                  queueStatus: "Scheduled" as const,
+                  room: appointment.room || "Super Health Center",
+                  createdAt: now(),
+                  queueArea: appointment.queueArea || "General Clinic",
+                  parentAppointmentId: appointment.id,
+                  followUpType: followUp.type,
+                  followUpReason: followUp.reason,
+                  followUpNumber: (appointment.followUpNumber || 0) + 1,
+                }
+              : null;
+            return {
+              ...d,
+              medicalRecords: [
+                {
+                  id: recordId,
+                  patientId: appointment.patientId,
+                  appointmentId: appointment.id,
+                  parentConsultationId: appointment.parentAppointmentId,
+                  careArea: appointment.queueArea || "General Clinic",
+                  followUpNumber: appointment.followUpNumber,
+                  followUpPlan: followUp?.date
+                    ? { ...followUp, building: appointment.room || "Super Health Center" }
+                    : undefined,
                   date: new Date().toISOString().slice(0, 10),
                   clinicianId: clinician.id,
                   clinician: clinician.fullName,
@@ -1420,6 +1521,12 @@ export function PrototypeStoreProvider({
                 },
                 ...d.medicalRecords,
               ],
+              appointments: followUpAppointment
+                ? [followUpAppointment, ...d.appointments.map((a) => a.id === id ? { ...a, queueStatus: "Consultation Completed" as const } : a)]
+                : d.appointments.map((a) => a.id === id ? { ...a, queueStatus: "Consultation Completed" as const } : a),
+              notifications: followUpAppointment
+                ? [{ id: crypto.randomUUID(), patientId: appointment.patientId, title: "Follow-up scheduled", message: `${followUp.type} is scheduled for ${followUp.date} at ${followUpAppointment.room}.`, createdAt: now(), read: false, type: "reminder" as const }, ...d.notifications].slice(0, 100)
+                : d.notifications,
             };
           },
         );
