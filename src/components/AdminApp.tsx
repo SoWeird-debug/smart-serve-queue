@@ -9,6 +9,8 @@ import {
   Eye,
   KeyRound,
   LayoutDashboard,
+  ListFilter,
+  LogOut,
   MapPin,
   Package,
   Pencil,
@@ -26,12 +28,14 @@ import {
   X,
 } from "lucide-react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -81,7 +85,8 @@ type Page =
   | "trends"
   | "inventory"
   | "users"
-  | "cast";
+  | "cast"
+  | "settings";
 const nav: [Page, string, any][] = [
   ["overview", "Overview", LayoutDashboard],
   ["appointments", "Appointments", Calendar],
@@ -92,43 +97,150 @@ const nav: [Page, string, any][] = [
   ["inventory", "Inventory", Package],
   ["users", "Staff & Roles", UserCog],
   ["cast", "Cast Center", Cast],
+  ["settings", "Settings", Settings],
 ];
-export function AdminApp() {
+const kpiPresentation: Record<
+  string,
+  { Icon: typeof Calendar; tone: string; hint: string }
+> = {
+  "Filtered appointments": {
+    Icon: Calendar,
+    tone: "bg-primary-soft text-primary",
+    hint: "Selected range",
+  },
+  "Present check-ins": {
+    Icon: Users,
+    tone: "bg-secondary-soft text-secondary",
+    hint: "On site today",
+  },
+  "Completed checkups": {
+    Icon: Stethoscope,
+    tone: "bg-violet-50 text-violet-600",
+    hint: "Care completed",
+  },
+  "Currently in queue": {
+    Icon: TrendingUp,
+    tone: "bg-amber-50 text-amber-600",
+    hint: "Needs service",
+  },
+  "Low-stock medicines": {
+    Icon: Package,
+    tone: "bg-rose-50 text-rose-600",
+    hint: "Review inventory",
+  },
+  "Active staff accounts": {
+    Icon: ShieldCheck,
+    tone: "bg-cyan-50 text-cyan-600",
+    hint: "Access enabled",
+  },
+};
+const defaultKpiPresentation = {
+  Icon: LayoutDashboard,
+  tone: "bg-muted text-muted-foreground",
+  hint: "Clinic metric",
+};
+export function AdminApp({
+  currentUser,
+  onSignOut,
+}: {
+  currentUser?: StaffUser;
+  onSignOut?: () => void;
+}) {
   const [page, setPage] = useState<Page>("overview");
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const store = usePrototypeStore();
+  const displayName = currentUser?.fullName || "Administrator";
+  const initials = displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((name) => name[0])
+    .join("")
+    .toUpperCase();
   return (
-    <div className="overflow-hidden rounded-[2rem] border border-border bg-card shadow-card">
-      <div className="grid min-h-[780px] md:grid-cols-[270px,1fr]">
-        <aside className="bg-gradient-to-b from-primary via-primary to-primary/90 p-5 text-primary-foreground">
-          <div className="mb-8 flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-card/15">
-              <Settings className="w-5 h-5" />
+    <div className="min-h-[calc(100vh-65px)] overflow-hidden bg-[#f4f7fb] lg:h-[calc(100vh-65px)] lg:min-h-0">
+      <div className="grid min-h-[calc(100vh-65px)] lg:h-full lg:min-h-0 lg:grid-cols-[300px,minmax(0,1fr)]">
+        <aside className="flex min-w-0 flex-col bg-gradient-to-b from-[#087fc9] via-[#0871bd] to-[#075caa] p-4 text-primary-foreground lg:h-full lg:overflow-hidden lg:p-5">
+          <div className="mb-5 flex items-center gap-3 lg:mb-8">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-card/15 shadow-soft">
+              <Settings className="h-5 w-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <p className="font-display font-bold">SmartServe</p>
               <p className="text-[10px] opacity-70">
-                Clinic operations console
+                Super Health Center · Jones, Isabela
               </p>
             </div>
           </div>
-          <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[.16em] opacity-60">
+          <p className="mb-2 hidden px-3 text-[10px] font-semibold uppercase tracking-[.16em] opacity-60 lg:block">
             Workspace
           </p>
-          <nav className="space-y-1">
+          <nav
+            className="flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible"
+            aria-label="Administration navigation"
+          >
             {nav.map(([id, label, Icon]) => (
               <button
                 key={id}
                 onClick={() => setPage(id)}
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm ${page === id ? "bg-card text-primary shadow-card" : "text-primary-foreground/75 hover:bg-card/10"}`}
+                className={`flex shrink-0 items-center gap-3 whitespace-nowrap rounded-xl px-3 py-2.5 text-left text-sm transition-colors lg:w-full ${page === id ? "bg-card text-primary shadow-card" : "text-primary-foreground/75 hover:bg-card/10"}`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="h-4 w-4" />
                 {label}
               </button>
             ))}
           </nav>
-          <SidebarCalendar />
+          <div className="mt-auto pt-6">
+            <div className="mb-4 hidden 2xl:block">
+              <SidebarCalendar />
+            </div>
+            <div className="relative">
+              {accountMenuOpen ? (
+                <div
+                  id="admin-account-menu"
+                  className="absolute bottom-full left-0 right-0 z-20 mb-2 rounded-2xl border border-primary-foreground/20 bg-card p-2 text-foreground shadow-card"
+                >
+                  <p className="px-2 pt-1 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground">
+                    Signed in as
+                  </p>
+                  <p className="truncate px-2 pb-2 pt-1 text-sm font-semibold">
+                    {displayName}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Log out
+                  </button>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setAccountMenuOpen((open) => !open)}
+                aria-expanded={accountMenuOpen}
+                aria-controls="admin-account-menu"
+                className="flex w-full items-center gap-3 rounded-2xl border border-primary-foreground/15 bg-card/10 p-2 text-left transition-colors hover:bg-card/15"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-card text-sm font-bold text-primary shadow-soft">
+                  {initials || "AD"}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold">
+                    {displayName}
+                  </span>
+                  <span className="block text-[10px] text-primary-foreground/70">
+                    Administrator · account menu
+                  </span>
+                </span>
+              </button>
+            </div>
+          </div>
         </aside>
-        <main className="bg-muted/20 p-5 md:p-8">
+        <main
+          className={`min-w-0 bg-[#f4f7fb] lg:h-full ${page === "overview" ? "p-3 sm:p-4 xl:p-4 lg:overflow-y-hidden" : "p-4 sm:p-6 xl:p-8 lg:overflow-y-auto"}`}
+        >
           <PageContent page={page} store={store} />
         </main>
       </div>
@@ -147,7 +259,7 @@ function SidebarCalendar() {
   );
   return (
     <section
-      className="mt-6 rounded-2xl border border-primary-foreground/15 bg-card/10 p-3 backdrop-blur-sm"
+      className="rounded-2xl border border-primary-foreground/15 bg-card/10 p-3 backdrop-blur-sm"
       aria-label="Current month calendar"
     >
       <div className="mb-3 flex items-center justify-between">
@@ -254,6 +366,7 @@ function PageContent({ page, store }: any) {
       />
     );
   if (page === "cast") return <CastCenter />;
+  if (page === "settings") return <SettingsPage store={store} />;
   if (page === "inventory")
     return (
       <MedicinePage
@@ -310,6 +423,11 @@ type DiagnosisSummary = {
   value: number;
   color: string;
 };
+type DashboardSlice = {
+  name: string;
+  value: number;
+  color: string;
+};
 
 const diagnosisColors = [
   "#0ea5e9",
@@ -318,6 +436,14 @@ const diagnosisColors = [
   "#f97316",
   "#ec4899",
   "#64748b",
+];
+const dashboardChartColors = [
+  "#0ea5e9",
+  "#16a34a",
+  "#2563eb",
+  "#f59e0b",
+  "#f43f5e",
+  "#8b5cf6",
 ];
 const diagnosisAcronym = (diagnosis: string) => {
   const normalized = diagnosis.trim().toLowerCase();
@@ -332,6 +458,26 @@ const diagnosisAcronym = (diagnosis: string) => {
   };
   if (known[normalized]) return known[normalized];
   const letters = diagnosis
+    .match(/[A-Za-z0-9]+/g)
+    ?.map((word) => word[0])
+    .join("")
+    .toUpperCase();
+  return letters?.slice(0, 5) || "N/A";
+};
+
+const serviceAcronym = (serviceName: string) => {
+  const normalized = serviceName.trim().toLowerCase();
+  const known: Record<string, string> = {
+    "general consultation": "GC",
+    "prenatal check-up": "PNC",
+    "family planning": "FP",
+    "mental health": "MH",
+    "animal bite": "AB",
+    "child immunization": "CI",
+    "dental care": "DC",
+  };
+  if (known[normalized]) return known[normalized];
+  const letters = serviceName
     .match(/[A-Za-z0-9]+/g)
     ?.map((word) => word[0])
     .join("")
@@ -364,13 +510,18 @@ function OverviewDashboard({ store }: any) {
     staffUsers,
     medicalRecords,
     audit,
-    reset,
   } = store;
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [serviceId, setServiceId] = useState("all");
   const [status, setStatus] = useState("all");
-  const [importOpen, setImportOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filterDraft, setFilterDraft] = useState({
+    from: "",
+    to: "",
+    serviceId: "all",
+    status: "all",
+  });
   const [selectedDiagnosis, setSelectedDiagnosis] =
     useState<DiagnosisSummary | null>(null);
   const filteredAppointments = useMemo(
@@ -435,7 +586,62 @@ function OverviewDashboard({ store }: any) {
           { name: "In consultation", value: 0 },
           { name: "Completed", value: 0 },
           { name: "Cancelled", value: 0 },
-        ];
+    ];
+  }, [filteredAppointments]);
+  const patientProfileData = useMemo<DashboardSlice[]>(() => {
+    const counts = patients.reduce((result: Record<string, number>, patient: any) => {
+      const label = patient.gender || "Not recorded";
+      result[label] = (result[label] || 0) + 1;
+      return result;
+    }, {});
+    return Object.entries(counts)
+      .map(([name, value], index) => ({
+        name,
+        value: Number(value),
+        color: dashboardChartColors[index % dashboardChartColors.length],
+      }))
+      .sort((first, second) => second.value - first.value);
+  }, [patients]);
+  const workflowData = useMemo<DashboardSlice[]>(
+    () =>
+      statusData.map((item, index) => ({
+        name: item.name,
+        value: Number(item.value),
+        color: dashboardChartColors[index % dashboardChartColors.length],
+      })),
+    [statusData],
+  );
+  const serviceUtilizationData = useMemo(
+    () =>
+      services
+        .map((service: any) => ({
+          name: service.name,
+          shortName: serviceAcronym(service.name),
+          appointments: filteredAppointments.filter(
+            (appointment: any) => appointment.serviceId === service.id,
+          ).length,
+        }))
+        .sort((first: any, second: any) => second.appointments - first.appointments)
+        .slice(0, 6),
+    [services, filteredAppointments],
+  );
+  const upcomingAppointments = useMemo(() => {
+    const actionable = filteredAppointments.filter((appointment: any) =>
+      !["Completed", "Consultation Completed", "Cancelled", "No Show"].includes(
+        appointment.queueStatus,
+      ),
+    );
+    const today = new Date().toISOString().slice(0, 10);
+    const futureAppointments = actionable.filter(
+      (appointment: any) => appointment.date >= today,
+    );
+    return [...(futureAppointments.length ? futureAppointments : actionable)]
+      .sort((first: any, second: any) =>
+        `${first.date} ${first.timeSlot}`.localeCompare(
+          `${second.date} ${second.timeSlot}`,
+        ),
+      )
+      .slice(0, 3);
   }, [filteredAppointments]);
   const diagnosisData = useMemo<DiagnosisSummary[]>(() => {
     const results = Object.entries(
@@ -499,140 +705,117 @@ function OverviewDashboard({ store }: any) {
     setTo("");
     setServiceId("all");
     setStatus("all");
+    setFilterDraft({ from: "", to: "", serviceId: "all", status: "all" });
   };
-  const exportFilteredData = () => {
-    const rows = [
-      [
-        "Record type",
-        "Date",
-        "Patient ID",
-        "Service",
-        "Visit type",
-        "Queue status",
-        "Attendance",
-        "Diagnosis",
-        "Clinician",
-      ],
-      ...filteredAppointments.map((appointment: any) => {
-        const patient = patients.find(
-          (item: any) => item.id === appointment.patientId,
-        );
-        const service = services.find(
-          (item: any) => item.id === appointment.serviceId,
-        );
-        return [
-          "Appointment",
-          appointment.date,
-          patient?.patientNumber || appointment.patientId,
-          service?.name || "Unknown service",
-          appointment.visitType || "Scheduled",
-          appointment.queueStatus,
-          appointment.attendanceStatus,
-          "",
-          "",
-        ];
-      }),
-      ...filteredRecords.map((record: any) => {
-        const patient = patients.find(
-          (item: any) => item.id === record.patientId,
-        );
-        return [
-          "Completed checkup",
-          record.date,
-          patient?.patientNumber || record.patientId,
-          "",
-          "",
-          "",
-          "",
-          record.diagnosis,
-          record.clinician,
-        ];
-      }),
-    ];
-    const csv = rows
-      .map((row) =>
-        row
-          .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
-          .join(","),
-      )
-      .join("\n");
-    const file = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(file);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `smartserve-overview-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+  const applyFilters = () => {
+    setFrom(filterDraft.from);
+    setTo(filterDraft.to);
+    setServiceId(filterDraft.serviceId);
+    setStatus(filterDraft.status);
+    setFiltersOpen(false);
   };
+  const activeFilterCount = [
+    from,
+    to,
+    serviceId !== "all" ? serviceId : "",
+    status !== "all" ? status : "",
+  ].filter(Boolean).length;
   return (
-    <>
-      <Head
-        title="Live operations overview"
-        sub="Filter local operational data, monitor clinic workload, and export the current view."
-        action={
-          <div className="flex gap-2">
-            <Button
-              size="icon"
-              variant="outline"
-              title="Import CSV data"
-              aria-label="Import CSV data"
-              onClick={() => setImportOpen(true)}
-            >
-              <Upload className="h-4 w-4" />
+    <div className="flex h-full min-h-0 flex-col">
+      <section className="mb-4">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {activeFilterCount ? (
+            <Badge className="border-0 bg-primary-soft text-primary">
+              {activeFilterCount} active filter{activeFilterCount === 1 ? "" : "s"}
+            </Badge>
+          ) : null}
+          {activeFilterCount ? (
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              Clear filters
             </Button>
-            <Button variant="outline" onClick={reset}>
-              <DatabaseZap className="mr-2 h-4 w-4" />
-              Clear patient data
-            </Button>
-            <Button onClick={exportFilteredData}>
-              <Download className="mr-2 h-4 w-4" />
-              Export data
-            </Button>
-          </div>
-        }
-      />
-      <section className="mb-5 rounded-2xl border border-border bg-card p-5 shadow-soft">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="font-display font-bold">Dashboard filters</h3>
-            <p className="text-xs text-muted-foreground">
-              Appointment filters apply to date, service, and status. Checkup
-              cases use the selected date range.
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={clearFilters}>
-            Clear filters
+          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setFiltersOpen((open) => !open)}
+            aria-expanded={filtersOpen}
+            aria-controls="dashboard-filters"
+          >
+            <ListFilter className="mr-2 h-4 w-4" />
+            {filtersOpen ? "Hide filters" : "Filter dashboard"}
           </Button>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <DateFilter label="From date" value={from} onChange={setFrom} />
-          <DateFilter label="To date" value={to} onChange={setTo} />
-          <SelectFilter
-            label="Service"
-            value={serviceId}
-            onChange={setServiceId}
-            options={[
-              { value: "all", label: "All services" },
-              ...services.map((service: any) => ({
-                value: service.id,
-                label: service.name,
-              })),
-            ]}
-          />
-          <SelectFilter
-            label="Appointment status"
-            value={status}
-            onChange={setStatus}
-            options={[
-              { value: "all", label: "All statuses" },
-              ...statuses.map((item: string) => ({ value: item, label: item })),
-            ]}
-          />
-        </div>
+        {filtersOpen ? (
+          <form
+            id="dashboard-filters"
+            className="mt-3 rounded-2xl border border-border bg-card p-4 shadow-soft"
+            onSubmit={(event) => {
+              event.preventDefault();
+              applyFilters();
+            }}
+          >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-display font-bold">Dashboard filters</h2>
+                <p className="text-xs text-muted-foreground">
+                  Select a date range, service, or appointment status, then apply.
+                </p>
+              </div>
+              <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+                Reset
+              </Button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <DateFilter
+                label="From date"
+                value={filterDraft.from}
+                onChange={(value) =>
+                  setFilterDraft((draft) => ({ ...draft, from: value }))
+                }
+              />
+              <DateFilter
+                label="To date"
+                value={filterDraft.to}
+                onChange={(value) =>
+                  setFilterDraft((draft) => ({ ...draft, to: value }))
+                }
+              />
+              <SelectFilter
+                label="Service"
+                value={filterDraft.serviceId}
+                onChange={(value) =>
+                  setFilterDraft((draft) => ({ ...draft, serviceId: value }))
+                }
+                options={[
+                  { value: "all", label: "All services" },
+                  ...services.map((service: any) => ({
+                    value: service.id,
+                    label: service.name,
+                  })),
+                ]}
+              />
+              <SelectFilter
+                label="Appointment status"
+                value={filterDraft.status}
+                onChange={(value) =>
+                  setFilterDraft((draft) => ({ ...draft, status: value }))
+                }
+                options={[
+                  { value: "all", label: "All statuses" },
+                  ...statuses.map((item: string) => ({ value: item, label: item })),
+                ]}
+              />
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Button type="submit">
+                <ListFilter className="mr-2 h-4 w-4" />
+                Apply filters
+              </Button>
+            </div>
+          </form>
+        ) : null}
       </section>
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <Kpi
           label="Filtered appointments"
           value={filteredAppointments.length}
@@ -643,207 +826,208 @@ function OverviewDashboard({ store }: any) {
         <Kpi label="Low-stock medicines" value={lowStock} />
         <Kpi label="Active staff accounts" value={activeAccounts} />
       </div>
-      <div className="mb-5 grid gap-5 xl:grid-cols-[1.55fr,1fr]">
+      <div className="grid min-h-0 flex-1 auto-rows-max gap-3 lg:grid-cols-3 lg:auto-rows-fr">
         <DashboardCard
-          title="Appointments and completed cases"
-          sub="Daily volume within the selected date range."
+          title="Appointment overview"
+          sub="Daily scheduled visits and completed checkups in the selected date range."
         >
-          <div className="mb-3 flex flex-wrap gap-4 text-xs font-medium">
-            <span className="flex items-center gap-2">
-              <i className="h-2 w-2 rounded-full bg-primary" />
-              Appointments
-            </span>
-            <span className="flex items-center gap-2">
-              <i className="h-2 w-2 rounded-full bg-accent" />
-              Completed cases
-            </span>
-          </div>
-          <ResponsiveContainer width="100%" height={250}>
-            <AreaChart
-              data={trendData}
-              margin={{ left: -18, right: 12, top: 8, bottom: 0 }}
-            >
-              <defs>
-                <linearGradient
-                  id="appointmentFill"
-                  x1="0"
-                  y1="0"
-                  x2="0"
-                  y2="1"
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="mb-1 flex shrink-0 flex-wrap gap-3 text-[11px] font-medium">
+              <span className="flex items-center gap-2">
+                <i className="h-2 w-2 rounded-full bg-primary" />
+                Appointments
+              </span>
+              <span className="flex items-center gap-2">
+                <i className="h-2 w-2 rounded-full bg-accent" />
+                Completed cases
+              </span>
+            </div>
+            <div className="min-h-[130px] flex-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={trendData}
+                  margin={{ left: -18, right: 12, top: 8, bottom: 0 }}
                 >
-                  <stop
-                    offset="5%"
-                    stopColor="hsl(var(--primary))"
-                    stopOpacity={0.35}
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tickLine={false} axisLine={false} />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    cursor={{
+                      stroke: "hsl(var(--border))",
+                      strokeDasharray: "4 4",
+                    }}
+                    contentStyle={{
+                      borderRadius: 12,
+                      borderColor: "hsl(var(--border))",
+                    }}
                   />
-                  <stop
-                    offset="95%"
-                    stopColor="hsl(var(--primary))"
-                    stopOpacity={0}
+                  <Line
+                    type="monotone"
+                    dataKey="appointments"
+                    name="Appointments"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth={3}
+                    dot={{ r: 3, strokeWidth: 0, fill: "hsl(var(--primary))" }}
+                    activeDot={{ r: 5, strokeWidth: 0 }}
                   />
-                </linearGradient>
-                <linearGradient id="caseFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop
-                    offset="5%"
-                    stopColor="hsl(var(--accent))"
-                    stopOpacity={0.3}
+                  <Line
+                    type="monotone"
+                    dataKey="cases"
+                    name="Completed cases"
+                    stroke="hsl(var(--accent))"
+                    strokeWidth={3}
+                    dot={{ r: 3, strokeWidth: 0, fill: "hsl(var(--accent))" }}
+                    activeDot={{ r: 5, strokeWidth: 0 }}
                   />
-                  <stop
-                    offset="95%"
-                    stopColor="hsl(var(--accent))"
-                    stopOpacity={0}
-                  />
-                </linearGradient>
-              </defs>
-              <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis dataKey="date" tickLine={false} axisLine={false} />
-              <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
-              <Tooltip
-                cursor={{
-                  stroke: "hsl(var(--border))",
-                  strokeDasharray: "4 4",
-                }}
-                contentStyle={{
-                  borderRadius: 12,
-                  borderColor: "hsl(var(--border))",
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="appointments"
-                name="Appointments"
-                stroke="hsl(var(--primary))"
-                fill="url(#appointmentFill)"
-                strokeWidth={3}
-                activeDot={{ r: 5 }}
-              />
-              <Area
-                type="monotone"
-                dataKey="cases"
-                name="Completed cases"
-                stroke="hsl(var(--accent))"
-                fill="url(#caseFill)"
-                strokeWidth={3}
-                activeDot={{ r: 5 }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-          {!filteredAppointments.length && !filteredRecords.length && (
-            <p className="mt-2 text-center text-xs text-muted-foreground">
-              No matching records yet — the chart is ready for the first clinic
-              activity.
-            </p>
-          )}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            {!filteredAppointments.length && !filteredRecords.length && (
+              <p className="mt-2 text-center text-xs text-muted-foreground">
+                No matching records yet — the chart is ready for the first clinic
+                activity.
+              </p>
+            )}
+          </div>
         </DashboardCard>
         <DashboardCard
-          title="Appointment status"
-          sub="Current workflow state of matching appointments."
+          title="Patient statistics"
+          sub="Registered patient profile and the current visit workflow."
         >
-          <ResponsiveContainer width="100%" height={270}>
-            <BarChart
-              data={statusData}
-              layout="vertical"
-              margin={{ left: 8, right: 12, top: 8, bottom: 0 }}
-            >
-              <defs>
-                <linearGradient id="statusFill" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="hsl(var(--primary))" />
-                  <stop offset="100%" stopColor="hsl(var(--accent))" />
-                </linearGradient>
-              </defs>
-              <CartesianGrid horizontal={false} strokeDasharray="3 3" />
-              <XAxis
-                type="number"
-                allowDecimals={false}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                type="category"
-                dataKey="name"
-                width={104}
-                tickLine={false}
-                axisLine={false}
-              />
-              <Tooltip
-                cursor={{ fill: "hsl(var(--muted))" }}
-                contentStyle={{
-                  borderRadius: 12,
-                  borderColor: "hsl(var(--border))",
-                }}
-              />
-              <Bar
-                dataKey="value"
-                name="Appointments"
-                fill="url(#statusFill)"
-                radius={[0, 6, 6, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="grid h-full min-h-[130px] flex-1 gap-4 sm:grid-cols-2">
+            <DashboardDonut
+              title="Patient profile"
+              data={patientProfileData}
+              emptyText="No registered patients yet."
+            />
+            <DashboardDonut
+              title="Visit workflow"
+              data={workflowData.filter((item) => item.value > 0)}
+              emptyText="No matching appointments yet."
+            />
+          </div>
         </DashboardCard>
-      </div>
-      <div className="grid gap-5 xl:grid-cols-[1.1fr,.9fr]">
+        <div className="contents">
         <DashboardCard
           title="Cases by diagnosis"
           sub="Top disease trends from completed checkups. Click a bar to read the full diagnosis."
         >
-          <div className="mb-4 flex flex-wrap gap-2" aria-label="Disease acronym key">
-            {diagnosisData.map((item) => (
-              <button
-                type="button"
-                key={item.code}
-                onClick={() => item.value > 0 && setSelectedDiagnosis(item)}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-semibold transition-colors hover:border-primary/40 hover:bg-primary-soft"
-                title={item.name}
+          <div className="min-h-[130px] flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={diagnosisData}
+                margin={{ left: -18, right: 12, top: 12, bottom: 0 }}
               >
-                <span
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: item.color }}
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="code"
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 11, fontWeight: 700 }}
                 />
-                {item.code}
-              </button>
-            ))}
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+                <Tooltip cursor={{ fill: "hsl(var(--muted))" }} content={<DiagnosisChartTooltip />} />
+                <Bar
+                  dataKey="value"
+                  name="Cases"
+                  radius={[8, 8, 2, 2]}
+                  cursor="pointer"
+                  onClick={(entry: any) => {
+                    const selected = entry?.payload || entry;
+                    if (selected?.value > 0) setSelectedDiagnosis(selected);
+                  }}
+                >
+                  {diagnosisData.map((item) => (
+                    <Cell key={item.code} fill={item.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-          <ResponsiveContainer width="100%" height={254}>
-            <BarChart
-              data={diagnosisData}
-              margin={{ left: -18, right: 12, top: 12, bottom: 0 }}
-            >
-              <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis
-                dataKey="code"
-                tickLine={false}
-                axisLine={false}
-                tick={{ fontSize: 11, fontWeight: 700 }}
-              />
-              <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
-              <Tooltip cursor={{ fill: "hsl(var(--muted))" }} content={<DiagnosisChartTooltip />} />
-              <Bar
-                dataKey="value"
-                name="Cases"
-                radius={[8, 8, 2, 2]}
-                cursor="pointer"
-                onClick={(entry: any) => {
-                  const selected = entry?.payload || entry;
-                  if (selected?.value > 0) setSelectedDiagnosis(selected);
-                }}
-              >
-                {diagnosisData.map((item) => (
-                  <Cell key={item.code} fill={item.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-          <p className="mt-2 text-center text-xs text-muted-foreground">
-            Acronyms keep the chart readable. Select a bar or acronym to view
-            the full disease trend.
-          </p>
         </DashboardCard>
         <DashboardCard
-          title="Operational attention"
-          sub="Items that may need action today."
+          title="Service utilization"
+          sub="Appointments by service. Hover a bar for its full name."
         >
-          <div className="space-y-3">
+          <div className="min-h-[130px] flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={serviceUtilizationData}
+                margin={{ left: -18, right: 8, top: 12, bottom: 0 }}
+              >
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="shortName"
+                  interval={0}
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 10, fontWeight: 600 }}
+                />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+                <Tooltip
+                  cursor={{ fill: "hsl(var(--muted))" }}
+                  contentStyle={{
+                    borderRadius: 12,
+                    borderColor: "hsl(var(--border))",
+                  }}
+                  labelFormatter={(_, payload) => payload?.[0]?.payload?.name || "Service"}
+                />
+                <Bar dataKey="appointments" name="Appointments" radius={[7, 7, 2, 2]}>
+                  {serviceUtilizationData.map((service: any, index: number) => (
+                    <Cell
+                      key={service.name}
+                      fill={dashboardChartColors[index % dashboardChartColors.length]}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </DashboardCard>
+        </div>
+        <div className="contents">
+        <DashboardCard
+          title="Upcoming appointments"
+          sub="Next active visits based on the current dashboard filters."
+        >
+          {upcomingAppointments.length ? (
+            <div className="space-y-2">
+              {upcomingAppointments.map((appointment: any) => {
+                const patient = patients.find(
+                  (item: any) => item.id === appointment.patientId,
+                );
+                const service = services.find(
+                  (item: any) => item.id === appointment.serviceId,
+                );
+                return (
+                  <div
+                    key={appointment.id}
+                    className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-border bg-muted/20 px-2.5 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-slate-700">
+                        {patient?.fullName || patient?.patientNumber || "Patient record"}
+                      </p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {formatChartDate(appointment.date)} · {appointment.timeSlot} · {service?.name || "Service"}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-primary-soft px-2 py-1 text-[10px] font-semibold text-primary">
+                      {appointment.queueStatus || "Scheduled"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <ChartEmpty text="No active appointments match the current filters." />
+          )}
+        </DashboardCard>
+        <DashboardCard
+          title="Alerts & notifications"
+          sub="Operational items that may need staff action."
+        >
+          <div className="grid flex-1 grid-cols-2 grid-rows-2 gap-2">
             <Attention
               label="Medicines at or below reorder level"
               value={lowStock}
@@ -866,12 +1050,8 @@ function OverviewDashboard({ store }: any) {
             />
           </div>
         </DashboardCard>
+        </div>
       </div>
-      <ImportMigrationDialog
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        onImport={store.importMigration}
-      />
       <Dialog
         open={Boolean(selectedDiagnosis)}
         onOpenChange={(open) => {
@@ -914,6 +1094,171 @@ function OverviewDashboard({ store }: any) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+function SettingsPage({ store }: any) {
+  const [importOpen, setImportOpen] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const exportOperationalData = () => {
+    const patientById = new Map(
+      store.patients.map((patient: any) => [patient.id, patient]),
+    );
+    const serviceById = new Map(
+      store.services.map((service: any) => [service.id, service]),
+    );
+    const rows = [
+      [
+        "Record type",
+        "Date",
+        "Patient ID",
+        "Service",
+        "Visit type",
+        "Queue status",
+        "Attendance",
+        "Diagnosis",
+        "Clinician",
+      ],
+      ...store.appointments.map((appointment: any) => {
+        const patient = patientById.get(appointment.patientId);
+        const service = serviceById.get(appointment.serviceId);
+        return [
+          "Appointment",
+          appointment.date,
+          patient?.patientNumber || appointment.patientId,
+          service?.name || "Unknown service",
+          appointment.visitType || "Scheduled",
+          appointment.queueStatus,
+          appointment.attendanceStatus,
+          "",
+          "",
+        ];
+      }),
+      ...store.medicalRecords.map((record: any) => {
+        const patient = patientById.get(record.patientId);
+        return [
+          "Completed checkup",
+          record.date,
+          patient?.patientNumber || record.patientId,
+          "",
+          "",
+          "",
+          "",
+          record.diagnosis,
+          record.clinician,
+        ];
+      }),
+    ];
+    const csv = rows
+      .map((row) =>
+        row
+          .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
+          .join(","),
+      )
+      .join("\n");
+    const file = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `smartserve-operations-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <>
+      <Head
+        title="Settings"
+        sub="Import, export, and reset local prototype data."
+        action={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" />
+              Import CSV
+            </Button>
+            <Button variant="outline" onClick={() => setClearConfirmOpen(true)}>
+              <DatabaseZap className="mr-2 h-4 w-4" />
+              Clear patient data
+            </Button>
+            <Button onClick={exportOperationalData}>
+              <Download className="mr-2 h-4 w-4" />
+              Export data
+            </Button>
+          </div>
+        }
+      />
+      <div className="grid gap-5 xl:grid-cols-3">
+        <DashboardCard
+          title="Import historical data"
+          sub="Add a compatible SmartServe CSV without replacing existing data."
+        >
+          <p className="text-sm leading-6 text-muted-foreground">
+            Use this for verified historical patient, appointment, and checkup
+            records during migration.
+          </p>
+          <Button className="mt-4" onClick={() => setImportOpen(true)}>
+            <Upload className="mr-2 h-4 w-4" />
+            Choose CSV file
+          </Button>
+        </DashboardCard>
+        <DashboardCard
+          title="Export clinic data"
+          sub="Download the current appointment and completed-checkup records."
+        >
+          <p className="text-sm leading-6 text-muted-foreground">
+            The export is a local CSV file for authorized clinic reporting and
+            backup. It excludes account passwords.
+          </p>
+          <Button variant="outline" className="mt-4" onClick={exportOperationalData}>
+            <Download className="mr-2 h-4 w-4" />
+            Download CSV
+          </Button>
+        </DashboardCard>
+        <DashboardCard
+          title="Reset local prototype"
+          sub="Remove locally stored prototype records from this browser."
+        >
+          <p className="text-sm leading-6 text-muted-foreground">
+            This action removes local patient, appointment, consultation, and
+            staff-account data. It cannot be undone.
+          </p>
+          <Button
+            variant="outline"
+            className="mt-4 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setClearConfirmOpen(true)}
+          >
+            <DatabaseZap className="mr-2 h-4 w-4" />
+            Clear local data
+          </Button>
+        </DashboardCard>
+      </div>
+      <ImportMigrationDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImport={store.importMigration}
+      />
+      <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear local prototype data?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This cannot be undone. All locally saved patient profiles,
+              appointments, consultations, and staff accounts in this browser
+              will be removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={store.reset}
+            >
+              Clear local data
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -1153,6 +1498,84 @@ function SelectFilter({
     </div>
   );
 }
+function DashboardDonut({
+  title,
+  data,
+  emptyText,
+}: {
+  title: string;
+  data: DashboardSlice[];
+  emptyText: string;
+}) {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  return (
+    <section className="flex h-full min-w-0 flex-col rounded-xl border border-border bg-muted/20 p-2">
+      <p className="text-xs font-semibold text-slate-700">{title}</p>
+      {total ? (
+        <>
+          <div className="relative mx-auto h-[clamp(6rem,15vh,11rem)] w-full max-w-[180px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Tooltip
+                  contentStyle={{
+                    borderRadius: 12,
+                    borderColor: "hsl(var(--border))",
+                  }}
+                />
+                <Pie
+                  data={data}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={29}
+                  outerRadius={43}
+                  paddingAngle={data.length > 1 ? 3 : 0}
+                  cornerRadius={5}
+                  stroke="transparent"
+                >
+                  {data.map((item) => (
+                    <Cell key={item.name} fill={item.color} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
+              <div>
+                <p className="font-display text-xl font-bold text-slate-800">
+                  {total}
+                </p>
+                <p className="text-[10px] font-medium text-muted-foreground">
+                  total
+                </p>
+              </div>
+            </div>
+          </div>
+          <ul className="space-y-1">
+            {data.slice(0, 2).map((item) => (
+              <li key={item.name} className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                  <i
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: item.color }}
+                  />
+                  <span className="truncate">{item.name}</span>
+                </span>
+                <span className="font-semibold text-slate-700">
+                  {Math.round((item.value / total) * 100)}%
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+      <div className="grid min-h-28 flex-1 place-items-center text-center text-xs text-muted-foreground">
+          {emptyText}
+        </div>
+      )}
+    </section>
+  );
+}
 function DashboardCard({
   title,
   sub,
@@ -1163,10 +1586,12 @@ function DashboardCard({
   children: any;
 }) {
   return (
-    <section className="rounded-2xl border border-border bg-card p-5 shadow-soft">
-      <div className="mb-4">
-        <h3 className="font-display font-bold">{title}</h3>
-        <p className="text-xs text-muted-foreground">{sub}</p>
+    <section className="flex h-full min-w-0 min-h-0 flex-col rounded-2xl border border-border bg-card p-3 shadow-soft">
+      <div className="mb-2">
+        <h3 className="font-display text-sm font-bold">{title}</h3>
+        <p className="truncate text-[11px] text-muted-foreground" title={sub}>
+          {sub}
+        </p>
       </div>
       {children}
     </section>
@@ -1174,7 +1599,7 @@ function DashboardCard({
 }
 function ChartEmpty({ text }: { text: string }) {
   return (
-    <div className="grid h-[270px] place-items-center rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center text-sm text-muted-foreground">
+    <div className="grid h-28 place-items-center rounded-xl border border-dashed border-border bg-muted/20 p-3 text-center text-xs text-muted-foreground">
       {text}
     </div>
   );
@@ -1189,9 +1614,9 @@ function Attention({
   tone: string;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-3">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className={`font-display text-2xl font-bold ${tone}`}>{value}</p>
+    <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-3 py-1.5">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`font-display text-xl font-bold ${tone}`}>{value}</p>
     </div>
   );
 }
@@ -3528,11 +3953,25 @@ function Field({
   );
 }
 function Kpi({ label, value }: { label: string; value: number }) {
+  const item = kpiPresentation[label] || defaultKpiPresentation;
+  const Icon = item.Icon;
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-soft">
-      <p className="font-display text-2xl font-bold leading-none">{value}</p>
-      <p className="mt-1 text-xs leading-none text-muted-foreground">{label}</p>
-    </div>
+    <section className="min-w-0 rounded-2xl border border-slate-200 bg-card p-2.5 shadow-soft">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[11px] font-medium leading-3 text-muted-foreground">
+          {label}
+        </p>
+        <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg ${item.tone}`}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+      </div>
+      <p className="mt-2 font-display text-xl font-bold leading-none text-slate-800">
+        {value}
+      </p>
+      <p className="mt-1 truncate text-[10px] font-medium text-muted-foreground">
+        {item.hint}
+      </p>
+    </section>
   );
 }
 function Empty({ text }: { text: string }) {

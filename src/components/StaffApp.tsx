@@ -100,7 +100,7 @@ const normalizePatientIdentity = (value: string) =>
     .replace(/[^a-z0-9]/g, "");
 
 type LocationSource =
-  "Auto-pinned from address" | "Staff-adjusted" | "Barangay fallback";
+  "Auto-pinned from address" | "Staff-adjusted";
 type AddressCandidate = PinnedLocation & { displayName: string };
 type NominatimSearchResult = { lat: string; lon: string; display_name: string };
 
@@ -635,6 +635,7 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
     "Auto-pinned from address",
   );
   const [locationVerified, setLocationVerified] = useState(false);
+  const [verifiedAddress, setVerifiedAddress] = useState("");
   const [locationDetailsStatus, setLocationDetailsStatus] = useState("");
   const [registrationError, setRegistrationError] = useState("");
   const fullName = [
@@ -656,13 +657,43 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
   ]
     .filter(Boolean)
     .join(", ");
+  // Barangay is a form label rather than part of the locality name in many
+  // OpenStreetMap records (for example, "Baluarte" rather than
+  // "Barangay Baluarte"). Keep the recorded address unchanged, but remove
+  // that label from the search query so the entered address resolves reliably.
+  const addressSearchQuery = [
+    form.addressLine,
+    form.barangay.replace(/^\s*barangay\s+/i, ""),
+    form.municipality,
+    form.province,
+    form.postalCode,
+    "Philippines",
+  ]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(", ");
   const addressReady = Boolean(
-    form.barangay.trim() && form.municipality.trim() && form.province.trim(),
+    form.addressLine.trim() &&
+      form.barangay.trim() &&
+      form.municipality.trim() &&
+      form.province.trim() &&
+      form.postalCode.trim(),
   );
   const age = calculateAge(form.dob);
   const requiresGuardian = age !== null && age < 18;
-  const set = (key: string, value: any) =>
+  const set = (key: string, value: any) => {
+    if (
+      ["addressLine", "barangay", "municipality", "province", "postalCode"].includes(
+        key,
+      )
+    ) {
+      setLocationVerified(false);
+      setVerifiedAddress("");
+      setCandidates([]);
+      setPin(null);
+    }
     setForm((current) => ({ ...current, [key]: value }));
+  };
   const fillDetectedLocationDetails = async (location: PinnedLocation) => {
     setLocationDetailsStatus(
       "Looking up the province, municipality, barangay, and postal code…",
@@ -695,25 +726,26 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
     }
   };
   const hasUsableLocation =
-    Boolean(pin) &&
-    (locationVerified || locationSource === "Barangay fallback");
+    Boolean(pin) && locationVerified && verifiedAddress === address;
   const searchLocation = async () => {
     if (!addressReady) {
       setCandidates([]);
       setPinStatus(
-        "Enter the barangay, municipality or city, and province before locating the address.",
+        "Complete the house or street, barangay, municipality or city, province, and postal code before searching.",
       );
       return;
     }
     setIsSearching(true);
     setCandidates([]);
+    setPin(null);
     setLocationVerified(false);
-    setPinStatus("Searching for matching Philippine addresses…");
+    setVerifiedAddress("");
+    setPinStatus("Searching for the entered Philippine residence address…");
     try {
-      const results = await searchAddressCandidates(address);
+      const results = await searchAddressCandidates(addressSearchQuery);
       if (!results.length) {
         setPinStatus(
-          "No precise address match was found. Tap the map to place a pin, or record barangay only.",
+          "No exact address match was found. Tap the map to place the residence pin, then verify it with the patient.",
         );
       } else {
         const bestMatch = results[0];
@@ -729,61 +761,12 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
       }
     } catch {
       setPinStatus(
-        "Address search is unavailable right now. Place the pin manually, or record barangay only.",
+        "Address search is unavailable right now. Place the residence pin manually, then verify it with the patient.",
       );
     } finally {
       setIsSearching(false);
     }
   };
-  useEffect(() => {
-    if (!addressReady) {
-      setCandidates([]);
-      return;
-    }
-    const controller = new AbortController();
-    const debounce = window.setTimeout(async () => {
-      setIsSearching(true);
-      setCandidates([]);
-      setLocationVerified(false);
-      setPinStatus(
-        "Locating the entered barangay, municipality, and province…",
-      );
-      try {
-        const results = await searchAddressCandidates(
-          address,
-          controller.signal,
-        );
-        if (controller.signal.aborted) return;
-        if (!results.length) {
-          setPinStatus(
-            "No precise address match was found. Tap the map to place a pin, or record barangay only.",
-          );
-          return;
-        }
-        const bestMatch = results[0];
-        setCandidates(results);
-        setPin({
-          latitude: bestMatch.latitude,
-          longitude: bestMatch.longitude,
-        });
-        setLocationSource("Auto-pinned from address");
-        setPinStatus(
-          "Best address match is previewed on the map. Compare the suggestions, then verify the pin with the patient.",
-        );
-      } catch {
-        if (!controller.signal.aborted)
-          setPinStatus(
-            "Address search is unavailable right now. Place the pin manually, or record barangay only.",
-          );
-      } finally {
-        if (!controller.signal.aborted) setIsSearching(false);
-      }
-    }, 650);
-    return () => {
-      window.clearTimeout(debounce);
-      controller.abort();
-    };
-  }, [address, addressReady]);
   const selectCandidate = (candidate: AddressCandidate) => {
     const selectedPin = {
       latitude: candidate.latitude,
@@ -794,17 +777,9 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
     setCandidates([]);
     setLocationSource("Auto-pinned from address");
     setLocationVerified(false);
+    setVerifiedAddress("");
     setPinStatus(
       "Address result selected. Review the pin with the patient and mark it verified.",
-    );
-  };
-  const useBarangayOnly = () => {
-    setCandidates([]);
-    setPin({ latitude: 16.5613, longitude: 121.7023 });
-    setLocationSource("Barangay fallback");
-    setLocationVerified(false);
-    setPinStatus(
-      "Only the province, municipality, and barangay will be used for disease trends. No exact residence pin will be shown on the map.",
     );
   };
   const submit = () => {
@@ -832,7 +807,7 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
       !form.privacyAcknowledged
     ) {
       setRegistrationError(
-        "Complete the required identity, contact, address, coverage, and consent details before saving.",
+        "Complete the required identity, contact, address, verified residence pin, coverage, and consent details before saving.",
       );
       return;
     }
@@ -897,9 +872,8 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
       <p className="text-sm text-muted-foreground mb-5">
         This uses the same patient-profile standard as online registration.
         Complete it with the patient, then search and confirm the residence
-        location. Once the barangay, municipality, and province are entered,
-        the system automatically finds an estimated barangay reference pin for
-        staff to review and adjust.
+        location. Enter the complete address first, then search for and verify
+        the exact residence pin before saving.
       </p>
       <div className="mb-5 rounded-xl border border-primary/20 bg-primary-soft/60 px-4 py-3 text-sm text-primary">
         A permanent SmartServe patient ID is created on save. Future walk-ins,
@@ -962,10 +936,15 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
 
         <section className="rounded-2xl border border-border bg-muted/20 p-4">
           <div className="mb-4">
-            <h4 className="font-display font-bold">Contact details</h4>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="font-display font-bold">Contact details</h4>
+              <span className="text-xs font-semibold text-destructive">
+                Required: mobile number
+              </span>
+            </div>
             <p className="text-xs text-muted-foreground">
-              A primary mobile number supports appointment and follow-up
-              contact.
+              Enter the patient&apos;s primary mobile number for appointment and
+              follow-up contact.
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
@@ -989,7 +968,8 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
           <div className="mb-4">
             <h4 className="font-display font-bold">Residence address</h4>
             <p className="text-xs text-muted-foreground">
-              The address is used for contact and privacy-safe disease trend
+              All fields are required. The complete address is searched to find
+              and verify the residence pin used for privacy-safe disease trend
               mapping.
             </p>
           </div>
@@ -1139,18 +1119,20 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
           <div>
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-primary" />
-              <Label>Verified residence location</Label>
+              <Label>
+                Verified residence location <span className="text-destructive">*</span>
+              </Label>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Enter the residence address to locate it, then move the map pin
-              with the patient if needed.
+              Search the complete entered address, then adjust the map pin with
+              the patient if needed and confirm it below.
             </p>
           </div>
           <Button
             type="button"
             variant="outline"
             onClick={searchLocation}
-            disabled={isSearching}
+            disabled={isSearching || !addressReady}
           >
             <Search className="mr-2 h-4 w-4" />
             {isSearching ? "Searching…" : "Search entered address"}
@@ -1184,11 +1166,13 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
               setPin(next);
               setLocationSource("Staff-adjusted");
               setLocationVerified(false);
+              setVerifiedAddress("");
               void fillDetectedLocationDetails(next);
             }}
             onLocationMethodChange={() => {
               setLocationSource("Staff-adjusted");
               setLocationVerified(false);
+              setVerifiedAddress("");
             }}
           />
         </div>
@@ -1199,19 +1183,23 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
         ) : null}
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span>{pinStatus}</span>
-          {pin && locationSource !== "Barangay fallback" ? (
+          {pin ? (
             <span>
               Pin: {pin.latitude.toFixed(5)}, {pin.longitude.toFixed(5)}
               {pin.accuracy ? ` · device accuracy ±${pin.accuracy} m` : ""}
             </span>
           ) : null}
         </div>
-        {locationSource !== "Barangay fallback" ? (
+        {pin ? (
           <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-primary/20 bg-primary-soft/50 p-3 text-sm">
             <input
               type="checkbox"
-              checked={locationVerified}
-              onChange={(event) => setLocationVerified(event.target.checked)}
+              checked={locationVerified && verifiedAddress === address}
+              onChange={(event) => {
+                const isVerified = event.target.checked;
+                setLocationVerified(isVerified);
+                setVerifiedAddress(isVerified ? address : "");
+              }}
               className="mt-0.5 h-4 w-4 accent-primary"
             />
             <span>
@@ -1220,28 +1208,16 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
               </span>
               <br />
               <span className="text-xs text-muted-foreground">
-                I confirmed this pin represents the patient’s residence.
+                I confirmed this pin represents the complete residence address
+                entered above.
               </span>
             </span>
           </label>
         ) : null}
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">
-            No precise residence match or location details available?
-          </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={useBarangayOnly}
-          >
-            Record barangay only
-          </Button>
-        </div>
         {!hasUsableLocation ? (
           <p className="mt-2 text-xs font-medium text-amber-700">
-            Choose and verify an exact pin, or record barangay only before
-            saving.
+            Search the complete address or place an exact residence pin, then
+            verify it with the patient before saving.
           </p>
         ) : null}
       </div>

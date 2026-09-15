@@ -19,22 +19,6 @@ const workspaceForRole = (role: StaffUser["role"]): Workspace => {
   return "staff";
 };
 
-const workspaceLabel: Record<Workspace, string> = {
-  patient: "Patient portal",
-  staff: "Front desk & triage",
-  doctor: "Doctor consultation",
-  pharmacy: "Pharmacy inventory",
-  admin: "Administration",
-};
-
-const workspaceLabelForUser = (
-  workspace: Workspace,
-  user: StaffUser | null,
-) => {
-  if (workspace !== "staff") return workspaceLabel[workspace];
-  return user?.role === "Nurse / Triage" ? "Nurse / triage" : "Front desk";
-};
-
 const Index = () => {
   const displayMode = new URLSearchParams(window.location.search).get("display");
   const isAnimalBiteQueueDisplay = window.location.pathname === "/animal-bite-queue";
@@ -64,32 +48,58 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 border-b border-border bg-card/85 backdrop-blur-xl">
-        <div className="container flex items-center justify-between gap-4 py-3">
-          <div className="flex items-center gap-3">
+        <div
+          className={
+            workspace === "admin"
+              ? "flex items-center justify-between gap-4 px-4 py-3 sm:px-6 xl:px-8"
+              : "container flex items-center justify-between gap-4 py-3"
+          }
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-primary shadow-glow">
               <Heart className="h-5 w-5 text-primary-foreground" fill="currentColor" />
             </div>
-            <div>
-              <h1 className="font-display text-lg font-bold leading-none">SmartServe</h1>
-              <p className="mt-1 text-xs text-muted-foreground">{workspaceLabelForUser(workspace, signedInUser)}{signedInUser ? ` · ${signedInUser.fullName}` : ""}</p>
+            <div className="min-w-0">
+              <h1 className="font-display text-sm font-bold leading-tight md:text-base">
+                An integrated web application for service booking with Disease
+                trend monitoring in Super Health Center of Jones, Isabela
+              </h1>
             </div>
           </div>
-          <Button size="sm" variant="outline" onClick={returnToAccess}>
-            <LogOut className="mr-2 h-4 w-4" />
-            {workspace === "patient" ? "Change access" : "Sign out"}
-          </Button>
+          {workspace !== "admin" ? (
+            <Button size="sm" variant="outline" onClick={returnToAccess}>
+              <LogOut className="mr-2 h-4 w-4" />
+              {workspace === "patient" ? "Change access" : "Sign out"}
+            </Button>
+          ) : null}
         </div>
       </header>
-      <main className="container animate-fade-in py-8 md:py-12" key={workspace}>
+      <main
+        className={
+          workspace === "admin"
+            ? "animate-fade-in"
+            : "container animate-fade-in py-8 md:py-12"
+        }
+        key={workspace}
+      >
         {workspace === "patient" ? <PatientApp /> : null}
         {workspace === "staff" ? <StaffApp currentUser={signedInUser || undefined} /> : null}
         {workspace === "doctor" ? <DoctorApp currentUser={signedInUser || undefined} /> : null}
         {workspace === "pharmacy" ? <PharmacyApp /> : null}
-        {workspace === "admin" ? <AdminApp /> : null}
+        {workspace === "admin" ? (
+          <AdminApp
+            currentUser={signedInUser || undefined}
+            onSignOut={returnToAccess}
+          />
+        ) : null}
       </main>
-      <footer className="mt-16 border-t border-border bg-card/50">
-        <div className="container py-6 text-center text-xs text-muted-foreground">SmartServe · Prototype for the Super Health Center of Jones, Isabela</div>
-      </footer>
+      {workspace !== "admin" ? (
+        <footer className="mt-16 border-t border-border bg-card/50">
+          <div className="container py-6 text-center text-xs text-muted-foreground">
+            SmartServe · Prototype for the Super Health Center of Jones, Isabela
+          </div>
+        </footer>
+      ) : null}
     </div>
   );
 };
