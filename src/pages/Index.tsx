@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Heart, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 
 import { AccessGateway } from "@/components/AccessGateway";
 import { PatientApp } from "@/components/PatientApp";
@@ -9,6 +9,7 @@ import { DoctorApp } from "@/components/DoctorApp";
 import { PharmacyApp } from "@/components/PharmacyApp";
 import { Button } from "@/components/ui/button";
 import type { StaffUser } from "@/lib/prototype-store";
+import superHealthCenterLogo from "@/assets/super-health-center-jones-logo.png";
 
 type Workspace = "patient" | "staff" | "doctor" | "pharmacy" | "admin";
 
@@ -47,33 +48,29 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b border-border bg-card/85 backdrop-blur-xl">
-        <div
-          className={
-            workspace === "admin"
-              ? "flex items-center justify-between gap-4 px-4 py-3 sm:px-6 xl:px-8"
-              : "container flex items-center justify-between gap-4 py-3"
-          }
-        >
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-primary shadow-glow">
-              <Heart className="h-5 w-5 text-primary-foreground" fill="currentColor" />
+      {workspace !== "admin" ? (
+        <header className="sticky top-0 z-50 border-b border-border bg-card/85 backdrop-blur-xl">
+          <div className="container flex items-center justify-between gap-4 py-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <img
+                src={superHealthCenterLogo}
+                alt="Jones Super Health Center seal"
+                className="h-11 w-11 shrink-0 object-contain drop-shadow-sm"
+              />
+              <div className="min-w-0">
+                <h1 className="font-display text-sm font-bold leading-tight md:text-base">
+                  An integrated web application for service booking with Disease
+                  trend monitoring in Super Health Center of Jones, Isabela
+                </h1>
+              </div>
             </div>
-            <div className="min-w-0">
-              <h1 className="font-display text-sm font-bold leading-tight md:text-base">
-                An integrated web application for service booking with Disease
-                trend monitoring in Super Health Center of Jones, Isabela
-              </h1>
-            </div>
-          </div>
-          {workspace !== "admin" ? (
             <Button size="sm" variant="outline" onClick={returnToAccess}>
               <LogOut className="mr-2 h-4 w-4" />
               {workspace === "patient" ? "Change access" : "Sign out"}
             </Button>
-          ) : null}
-        </div>
-      </header>
+          </div>
+        </header>
+      ) : null}
       <main
         className={
           workspace === "admin"

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Circle, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
 import { Crosshair, MapPin, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,17 +28,18 @@ function FocusJonesControl() {
   );
 }
 
-export function DiseaseTrendMap({ records }: { records: DiseaseRecord[] }) {
-  const categories = ["All diseases", ...Array.from(new Set(records.map((record) => record.category)))];
-  const [category, setCategory] = useState("All diseases");
-  const filtered = category === "All diseases"
-    ? records
-    : records.filter((record) => record.category === category);
-  const total = filtered.reduce((sum, record) => sum + record.count, 0);
+export function DiseaseTrendMap({
+  records,
+  className = "",
+}: {
+  records: DiseaseRecord[];
+  className?: string;
+}) {
+  const total = records.reduce((sum, record) => sum + record.count, 0);
 
   return (
-    <section className="mb-4 overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
-      <div className="flex flex-col gap-3 border-b border-border p-5 md:flex-row md:items-center md:justify-between">
+    <section className={`flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-soft ${className}`}>
+      <div className="flex shrink-0 flex-col gap-3 border-b border-border p-5 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <h3 className="font-display font-bold">Geographic disease concentration</h3>
@@ -49,24 +49,16 @@ export function DiseaseTrendMap({ records }: { records: DiseaseRecord[] }) {
             Jones, Isabela and nearby municipalities · click a shaded area for details
           </p>
         </div>
-        <select
-          value={category}
-          onChange={(event) => setCategory(event.target.value)}
-          className="h-10 rounded-xl border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-          aria-label="Filter disease category"
-        >
-          {categories.map((item) => <option key={item}>{item}</option>)}
-        </select>
       </div>
 
-      <div className="relative">
-        <MapContainer center={JONES_CENTER} zoom={13} scrollWheelZoom className="h-[430px] w-full">
+      <div className="relative min-h-[390px] flex-1">
+        <MapContainer center={JONES_CENTER} zoom={13} scrollWheelZoom className="h-full w-full">
           <TileLayer
             attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <FocusJonesControl />
-          {filtered.map((record) => {
+          {records.map((record) => {
             const color = riskColor(record.count);
             return (
               <Circle
@@ -103,7 +95,7 @@ export function DiseaseTrendMap({ records }: { records: DiseaseRecord[] }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 border-t border-border bg-muted/25 px-5 py-3 text-xs text-muted-foreground">
+      <div className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/25 px-5 py-3 text-xs text-muted-foreground">
         <ShieldCheck className="h-4 w-4 shrink-0 text-secondary" />
         Locations are aggregated by area. Individual patient identities are not shown.
       </div>

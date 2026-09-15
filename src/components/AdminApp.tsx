@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "rea
 import {
   Calendar,
   Cast,
+  ChevronDown,
   ClipboardPlus,
   Copy,
   DatabaseZap,
@@ -65,6 +66,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { DiseaseTrendMap } from "@/components/DiseaseTrendMap";
+import superHealthCenterLogo from "@/assets/super-health-center-jones-logo.png";
 import {
   usePrototypeStore,
   type AuditEvent,
@@ -87,57 +89,52 @@ type Page =
   | "users"
   | "cast"
   | "settings";
-const nav: [Page, string, any][] = [
+const workspaceNav: [Page, string, any][] = [
   ["overview", "Overview", LayoutDashboard],
   ["appointments", "Appointments", Calendar],
   ["patients", "Patient Records", Users],
-  ["services", "Services & Schedules", Stethoscope],
-  ["consultationTemplates", "Consultation templates", ClipboardPlus],
   ["trends", "Disease Trends", TrendingUp],
+];
+const settingsNav: [Page, string, any][] = [
+  ["settings", "System & data", Settings],
+  ["services", "Services & schedules", Stethoscope],
+  ["consultationTemplates", "Consultation templates", ClipboardPlus],
   ["inventory", "Inventory", Package],
   ["users", "Staff & Roles", UserCog],
   ["cast", "Cast Center", Cast],
-  ["settings", "Settings", Settings],
 ];
 const kpiPresentation: Record<
   string,
-  { Icon: typeof Calendar; tone: string; hint: string }
+  { Icon: typeof Calendar; tone: string }
 > = {
   "Filtered appointments": {
     Icon: Calendar,
     tone: "bg-primary-soft text-primary",
-    hint: "Selected range",
   },
   "Present check-ins": {
     Icon: Users,
     tone: "bg-secondary-soft text-secondary",
-    hint: "On site today",
   },
   "Completed checkups": {
     Icon: Stethoscope,
     tone: "bg-violet-50 text-violet-600",
-    hint: "Care completed",
   },
   "Currently in queue": {
     Icon: TrendingUp,
     tone: "bg-amber-50 text-amber-600",
-    hint: "Needs service",
   },
   "Low-stock medicines": {
     Icon: Package,
     tone: "bg-rose-50 text-rose-600",
-    hint: "Review inventory",
   },
   "Active staff accounts": {
     Icon: ShieldCheck,
     tone: "bg-cyan-50 text-cyan-600",
-    hint: "Access enabled",
   },
 };
 const defaultKpiPresentation = {
   Icon: LayoutDashboard,
   tone: "bg-muted text-muted-foreground",
-  hint: "Clinic metric",
 };
 export function AdminApp({
   currentUser,
@@ -147,8 +144,15 @@ export function AdminApp({
   onSignOut?: () => void;
 }) {
   const [page, setPage] = useState<Page>("overview");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const store = usePrototypeStore();
+  const fillsWorkspace = page === "overview" || page === "trends";
+  const isSettingsPage = settingsNav.some(([id]) => id === page);
+  const selectPage = (nextPage: Page) => {
+    setPage(nextPage);
+    if (settingsNav.some(([id]) => id === nextPage)) setSettingsOpen(true);
+  };
   const displayName = currentUser?.fullName || "Administrator";
   const initials = displayName
     .split(/\s+/)
@@ -158,42 +162,79 @@ export function AdminApp({
     .join("")
     .toUpperCase();
   return (
-    <div className="min-h-[calc(100vh-65px)] overflow-hidden bg-[#f4f7fb] lg:h-[calc(100vh-65px)] lg:min-h-0">
-      <div className="grid min-h-[calc(100vh-65px)] lg:h-full lg:min-h-0 lg:grid-cols-[300px,minmax(0,1fr)]">
+    <div className="min-h-screen overflow-hidden bg-[#f4f7fb] lg:h-screen lg:min-h-0">
+      <div className="grid min-h-screen lg:h-full lg:min-h-0 lg:grid-cols-[260px,minmax(0,1fr)]">
         <aside className="flex min-w-0 flex-col bg-gradient-to-b from-[#087fc9] via-[#0871bd] to-[#075caa] p-4 text-primary-foreground lg:h-full lg:overflow-hidden lg:p-5">
           <div className="mb-5 flex items-center gap-3 lg:mb-8">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-card/15 shadow-soft">
-              <Settings className="h-5 w-5" />
-            </div>
+            <img
+              src={superHealthCenterLogo}
+              alt="Jones Super Health Center seal"
+              className="h-20 w-20 shrink-0 object-contain drop-shadow-md"
+            />
             <div className="min-w-0">
-              <p className="font-display font-bold">SmartServe</p>
-              <p className="text-[10px] opacity-70">
+              <p className="font-display text-xl font-bold">SmartServe</p>
+              <p className="text-sm opacity-70">
                 Super Health Center · Jones, Isabela
               </p>
             </div>
           </div>
-          <p className="mb-2 hidden px-3 text-[10px] font-semibold uppercase tracking-[.16em] opacity-60 lg:block">
+          <p className="mb-2 hidden px-3 text-xs font-semibold uppercase tracking-[.16em] opacity-60 lg:block">
             Workspace
           </p>
           <nav
             className="flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible"
             aria-label="Administration navigation"
           >
-            {nav.map(([id, label, Icon]) => (
+            {workspaceNav.map(([id, label, Icon]) => (
               <button
                 key={id}
-                onClick={() => setPage(id)}
-                className={`flex shrink-0 items-center gap-3 whitespace-nowrap rounded-xl px-3 py-2.5 text-left text-sm transition-colors lg:w-full ${page === id ? "bg-card text-primary shadow-card" : "text-primary-foreground/75 hover:bg-card/10"}`}
+                onClick={() => selectPage(id)}
+                className={`flex shrink-0 items-center gap-3 whitespace-nowrap rounded-xl px-3 py-3 text-left text-base transition-colors lg:w-full ${page === id ? "bg-card text-primary shadow-card" : "text-primary-foreground/75 hover:bg-card/10"}`}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-5 w-5" />
                 {label}
               </button>
             ))}
+            <div className="shrink-0 lg:pt-1">
+              <button
+                type="button"
+                onClick={() => setSettingsOpen((open) => !open)}
+                aria-expanded={settingsOpen}
+                aria-controls="settings-submenu"
+                className={`flex w-full items-center gap-3 whitespace-nowrap rounded-xl px-3 py-3 text-left text-base transition-colors ${isSettingsPage ? "bg-card/15 text-primary-foreground" : "text-primary-foreground/75 hover:bg-card/10"}`}
+              >
+                <Settings className="h-5 w-5" />
+                <span className="flex-1">Settings</span>
+                <ChevronDown
+                  className={`h-5 w-5 transition-transform ${settingsOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              {settingsOpen ? (
+                <div
+                  id="settings-submenu"
+                  className="mt-1 flex gap-1 border-primary-foreground/20 pl-3 lg:block lg:space-y-1 lg:border-l"
+                >
+                  {settingsNav.map(([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => selectPage(id)}
+                      className={`flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2.5 text-left text-sm transition-colors lg:w-full ${page === id ? "bg-card text-primary shadow-soft" : "text-primary-foreground/75 hover:bg-card/10"}`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </nav>
           <div className="mt-auto pt-6">
-            <div className="mb-4 hidden 2xl:block">
-              <SidebarCalendar />
-            </div>
+            {!settingsOpen ? (
+              <div className="mb-4 hidden 2xl:block">
+                <SidebarCalendar />
+              </div>
+            ) : null}
             <div className="relative">
               {accountMenuOpen ? (
                 <div
@@ -239,7 +280,7 @@ export function AdminApp({
           </div>
         </aside>
         <main
-          className={`min-w-0 bg-[#f4f7fb] lg:h-full ${page === "overview" ? "p-3 sm:p-4 xl:p-4 lg:overflow-y-hidden" : "p-4 sm:p-6 xl:p-8 lg:overflow-y-auto"}`}
+          className={`min-w-0 bg-[#f4f7fb] lg:h-full ${fillsWorkspace ? "p-3 sm:p-4 xl:p-4 lg:overflow-y-hidden" : "p-4 sm:p-6 xl:p-8 lg:overflow-y-auto"}`}
         >
           <PageContent page={page} store={store} />
         </main>
@@ -377,44 +418,190 @@ function PageContent({ page, store }: any) {
         remove={store.deleteMedicine}
       />
     );
-  const records = medicalRecords.flatMap((r: any) => {
-    const p = patients.find((x: any) => x.id === r.patientId);
-    return p && p.locationSource !== "Barangay fallback" && p.locationVerified
-      ? [
-          {
-            id: r.id,
-            category: "Consultation diagnosis",
-            diagnosis: r.diagnosis,
-            date: r.date,
-            count: 1,
-            barangay: p.mobileLocationBarangay || p.barangay,
-            municipality: p.mobileLocationMunicipality || p.municipality,
-            latitude: p.latitude,
-            longitude: p.longitude,
-          },
-        ]
-      : [];
+  if (page === "trends")
+    return <DiseaseTrendsPage patients={patients} medicalRecords={medicalRecords} />;
+  return null;
+}
+
+function DiseaseTrendsPage({ patients, medicalRecords }: any) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filters, setFilters] = useState({
+    from: "",
+    to: "",
+    diagnosis: "all",
+    municipality: "all",
   });
+  const records = useMemo(
+    () =>
+      medicalRecords.flatMap((record: any) => {
+        const patient = patients.find((item: any) => item.id === record.patientId);
+        return patient && patient.locationSource !== "Barangay fallback" && patient.locationVerified
+          ? [
+              {
+                id: record.id,
+                category: "Consultation diagnosis",
+                diagnosis: record.diagnosis,
+                date: record.date,
+                count: 1,
+                barangay: patient.mobileLocationBarangay || patient.barangay,
+                municipality: patient.mobileLocationMunicipality || patient.municipality,
+                latitude: patient.latitude,
+                longitude: patient.longitude,
+              },
+            ]
+          : [];
+      }),
+    [medicalRecords, patients],
+  );
+  const diagnoses = useMemo(
+    () => [...new Set(records.map((record: any) => record.diagnosis))].sort(),
+    [records],
+  );
+  const municipalities = useMemo(
+    () => [...new Set(records.map((record: any) => record.municipality))].sort(),
+    [records],
+  );
+  const filteredRecords = useMemo(
+    () =>
+      records.filter((record: any) => {
+        if (filters.from && record.date < filters.from) return false;
+        if (filters.to && record.date > filters.to) return false;
+        if (filters.diagnosis !== "all" && record.diagnosis !== filters.diagnosis)
+          return false;
+        if (filters.municipality !== "all" && record.municipality !== filters.municipality)
+          return false;
+        return true;
+      }),
+    [filters, records],
+  );
+  const activeFilterCount = [
+    filters.from,
+    filters.to,
+    filters.diagnosis !== "all" ? filters.diagnosis : "",
+    filters.municipality !== "all" ? filters.municipality : "",
+  ].filter(Boolean).length;
+  const resetFilters = () =>
+    setFilters({ from: "", to: "", diagnosis: "all", municipality: "all" });
+  const exportTrendData = () => {
+    const rows = [
+      ["Date", "Diagnosis", "Barangay", "Municipality", "Recorded cases"],
+      ...filteredRecords.map((record: any) => [
+        record.date,
+        record.diagnosis,
+        record.barangay,
+        record.municipality,
+        record.count,
+      ]),
+    ];
+    const csv = rows
+      .map((row) =>
+        row
+          .map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`)
+          .join(","),
+      )
+      .join("\n");
+    const file = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `smartserve-disease-trends-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
   const barangayOnlyCases = medicalRecords.length - records.length;
   return (
-    <>
+    <div className="flex h-full min-h-0 flex-col">
       <Head
         title="Disease trends"
         sub="Completed consultation diagnoses mapped from verified current locations captured when patients selected a service."
+        action={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {activeFilterCount ? (
+              <Badge className="border-0 bg-primary-soft text-primary">
+                {activeFilterCount} active filter{activeFilterCount === 1 ? "" : "s"}
+              </Badge>
+            ) : null}
+            {activeFilterCount ? (
+              <Button type="button" variant="ghost" onClick={resetFilters}>
+                Clear filters
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setFiltersOpen((open) => !open)}
+              aria-expanded={filtersOpen}
+              aria-controls="disease-trend-filters"
+            >
+              <ListFilter className="mr-2 h-4 w-4" />
+              {filtersOpen ? "Hide filters" : "Filter"}
+            </Button>
+            <Button type="button" onClick={exportTrendData} disabled={!filteredRecords.length}>
+              <Download className="mr-2 h-4 w-4" />
+              Export data
+            </Button>
+          </div>
+        }
       />
+      {filtersOpen ? (
+        <section
+          id="disease-trend-filters"
+          className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-soft"
+        >
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <DateFilter
+              label="From date"
+              value={filters.from}
+              onChange={(from) => setFilters((current) => ({ ...current, from }))}
+            />
+            <DateFilter
+              label="To date"
+              value={filters.to}
+              onChange={(to) => setFilters((current) => ({ ...current, to }))}
+            />
+            <SelectFilter
+              label="Diagnosis"
+              value={filters.diagnosis}
+              onChange={(diagnosis) =>
+                setFilters((current) => ({ ...current, diagnosis }))
+              }
+              options={[
+                { value: "all", label: "All diagnoses" },
+                ...diagnoses.map((diagnosis) => ({ value: diagnosis, label: diagnosis })),
+              ]}
+            />
+            <SelectFilter
+              label="Municipality"
+              value={filters.municipality}
+              onChange={(municipality) =>
+                setFilters((current) => ({ ...current, municipality }))
+              }
+              options={[
+                { value: "all", label: "All municipalities" },
+                ...municipalities.map((municipality) => ({
+                  value: municipality,
+                  label: municipality,
+                })),
+              ]}
+            />
+          </div>
+        </section>
+      ) : null}
       {records.length ? (
-        <DiseaseTrendMap records={records} />
+        <DiseaseTrendMap records={filteredRecords} className="min-h-0 flex-1" />
       ) : (
         <Empty text="No completed consultation diagnosis with a verified map location has been recorded yet." />
       )}
       {barangayOnlyCases > 0 ? (
-        <p className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        <p className="mt-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
           {barangayOnlyCases} case{barangayOnlyCases === 1 ? "" : "s"} is
           recorded by barangay only or has an unverified pin, so it is
           intentionally excluded from the precise location map.
         </p>
       ) : null}
-    </>
+    </div>
   );
 }
 type DiagnosisSummary = {
@@ -723,7 +910,14 @@ function OverviewDashboard({ store }: any) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <section className="mb-4">
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1
+            className="min-w-0 flex-1 truncate font-display text-lg font-bold tracking-tight text-slate-800 xl:text-xl"
+            title="An integrated web application for service booking with Disease trend monitoring in Super Health Center of Jones, Isabela"
+          >
+            An integrated web application for service booking with Disease trend monitoring in Super Health Center of Jones, Isabela
+          </h1>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {activeFilterCount ? (
             <Badge className="border-0 bg-primary-soft text-primary">
               {activeFilterCount} active filter{activeFilterCount === 1 ? "" : "s"}
@@ -744,6 +938,7 @@ function OverviewDashboard({ store }: any) {
             <ListFilter className="mr-2 h-4 w-4" />
             {filtersOpen ? "Hide filters" : "Filter dashboard"}
           </Button>
+          </div>
         </div>
         {filtersOpen ? (
           <form
@@ -756,8 +951,8 @@ function OverviewDashboard({ store }: any) {
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="font-display font-bold">Dashboard filters</h2>
-                <p className="text-xs text-muted-foreground">
+                <h2 className="font-display text-lg font-bold">Dashboard filters</h2>
+                <p className="text-sm text-muted-foreground">
                   Select a date range, service, or appointment status, then apply.
                 </p>
               </div>
@@ -829,10 +1024,9 @@ function OverviewDashboard({ store }: any) {
       <div className="grid min-h-0 flex-1 auto-rows-max gap-3 lg:grid-cols-3 lg:auto-rows-fr">
         <DashboardCard
           title="Appointment overview"
-          sub="Daily scheduled visits and completed checkups in the selected date range."
         >
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="mb-1 flex shrink-0 flex-wrap gap-3 text-[11px] font-medium">
+            <div className="mb-2 flex shrink-0 flex-wrap gap-3 text-xs font-medium">
               <span className="flex items-center gap-2">
                 <i className="h-2 w-2 rounded-full bg-primary" />
                 Appointments
@@ -849,8 +1043,18 @@ function OverviewDashboard({ store }: any) {
                   margin={{ left: -18, right: 12, top: 8, bottom: 0 }}
                 >
                   <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tickLine={false} axisLine={false} />
-                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+                  <XAxis
+                    dataKey="date"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 12 }}
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 12 }}
+                  />
                   <Tooltip
                     cursor={{
                       stroke: "hsl(var(--border))",
@@ -883,7 +1087,7 @@ function OverviewDashboard({ store }: any) {
               </ResponsiveContainer>
             </div>
             {!filteredAppointments.length && !filteredRecords.length && (
-              <p className="mt-2 text-center text-xs text-muted-foreground">
+              <p className="mt-2 text-center text-sm text-muted-foreground">
                 No matching records yet — the chart is ready for the first clinic
                 activity.
               </p>
@@ -892,7 +1096,6 @@ function OverviewDashboard({ store }: any) {
         </DashboardCard>
         <DashboardCard
           title="Patient statistics"
-          sub="Registered patient profile and the current visit workflow."
         >
           <div className="grid h-full min-h-[130px] flex-1 gap-4 sm:grid-cols-2">
             <DashboardDonut
@@ -910,7 +1113,6 @@ function OverviewDashboard({ store }: any) {
         <div className="contents">
         <DashboardCard
           title="Cases by diagnosis"
-          sub="Top disease trends from completed checkups. Click a bar to read the full diagnosis."
         >
           <div className="min-h-[130px] flex-1">
             <ResponsiveContainer width="100%" height="100%">
@@ -923,9 +1125,14 @@ function OverviewDashboard({ store }: any) {
                   dataKey="code"
                   tickLine={false}
                   axisLine={false}
-                  tick={{ fontSize: 11, fontWeight: 700 }}
+                  tick={{ fontSize: 12, fontWeight: 700 }}
                 />
-                <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+                <YAxis
+                  allowDecimals={false}
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 12 }}
+                />
                 <Tooltip cursor={{ fill: "hsl(var(--muted))" }} content={<DiagnosisChartTooltip />} />
                 <Bar
                   dataKey="value"
@@ -947,7 +1154,6 @@ function OverviewDashboard({ store }: any) {
         </DashboardCard>
         <DashboardCard
           title="Service utilization"
-          sub="Appointments by service. Hover a bar for its full name."
         >
           <div className="min-h-[130px] flex-1">
             <ResponsiveContainer width="100%" height="100%">
@@ -961,9 +1167,14 @@ function OverviewDashboard({ store }: any) {
                   interval={0}
                   tickLine={false}
                   axisLine={false}
-                  tick={{ fontSize: 10, fontWeight: 600 }}
+                  tick={{ fontSize: 12, fontWeight: 600 }}
                 />
-                <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+                <YAxis
+                  allowDecimals={false}
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 12 }}
+                />
                 <Tooltip
                   cursor={{ fill: "hsl(var(--muted))" }}
                   contentStyle={{
@@ -988,7 +1199,6 @@ function OverviewDashboard({ store }: any) {
         <div className="contents">
         <DashboardCard
           title="Upcoming appointments"
-          sub="Next active visits based on the current dashboard filters."
         >
           {upcomingAppointments.length ? (
             <div className="space-y-2">
@@ -1005,14 +1215,14 @@ function OverviewDashboard({ store }: any) {
                     className="flex min-w-0 items-center justify-between gap-2 rounded-xl border border-border bg-muted/20 px-2.5 py-2"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-xs font-semibold text-slate-700">
+                      <p className="truncate text-sm font-semibold text-slate-700">
                         {patient?.fullName || patient?.patientNumber || "Patient record"}
                       </p>
-                      <p className="truncate text-[11px] text-muted-foreground">
+                      <p className="truncate text-xs text-muted-foreground">
                         {formatChartDate(appointment.date)} · {appointment.timeSlot} · {service?.name || "Service"}
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-primary-soft px-2 py-1 text-[10px] font-semibold text-primary">
+                    <span className="shrink-0 rounded-full bg-primary-soft px-2 py-1 text-xs font-semibold text-primary">
                       {appointment.queueStatus || "Scheduled"}
                     </span>
                   </div>
@@ -1025,7 +1235,6 @@ function OverviewDashboard({ store }: any) {
         </DashboardCard>
         <DashboardCard
           title="Alerts & notifications"
-          sub="Operational items that may need staff action."
         >
           <div className="grid flex-1 grid-cols-2 grid-rows-2 gap-2">
             <Attention
@@ -1510,7 +1719,7 @@ function DashboardDonut({
   const total = data.reduce((sum, item) => sum + item.value, 0);
   return (
     <section className="flex h-full min-w-0 flex-col rounded-xl border border-border bg-muted/20 p-2">
-      <p className="text-xs font-semibold text-slate-700">{title}</p>
+      <p className="text-sm font-semibold text-slate-700">{title}</p>
       {total ? (
         <>
           <div className="relative mx-auto h-[clamp(6rem,15vh,11rem)] w-full max-w-[180px]">
@@ -1542,10 +1751,10 @@ function DashboardDonut({
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
               <div>
-                <p className="font-display text-xl font-bold text-slate-800">
+                <p className="font-display text-2xl font-bold text-slate-800">
                   {total}
                 </p>
-                <p className="text-[10px] font-medium text-muted-foreground">
+                <p className="text-xs font-medium text-muted-foreground">
                   total
                 </p>
               </div>
@@ -1553,7 +1762,7 @@ function DashboardDonut({
           </div>
           <ul className="space-y-1">
             {data.slice(0, 2).map((item) => (
-              <li key={item.name} className="flex items-center justify-between gap-2 text-[11px]">
+              <li key={item.name} className="flex items-center justify-between gap-2 text-xs">
                 <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
                   <i
                     className="h-2 w-2 shrink-0 rounded-full"
@@ -1569,7 +1778,7 @@ function DashboardDonut({
           </ul>
         </>
       ) : (
-      <div className="grid min-h-28 flex-1 place-items-center text-center text-xs text-muted-foreground">
+      <div className="grid min-h-28 flex-1 place-items-center text-center text-sm text-muted-foreground">
           {emptyText}
         </div>
       )}
@@ -1582,16 +1791,18 @@ function DashboardCard({
   children,
 }: {
   title: string;
-  sub: string;
+  sub?: string;
   children: any;
 }) {
   return (
     <section className="flex h-full min-w-0 min-h-0 flex-col rounded-2xl border border-border bg-card p-3 shadow-soft">
-      <div className="mb-2">
-        <h3 className="font-display text-sm font-bold">{title}</h3>
-        <p className="truncate text-[11px] text-muted-foreground" title={sub}>
-          {sub}
-        </p>
+      <div className={sub ? "mb-2" : "mb-3"}>
+        <h3 className="font-display text-base font-bold">{title}</h3>
+        {sub ? (
+          <p className="truncate text-sm text-muted-foreground" title={sub}>
+            {sub}
+          </p>
+        ) : null}
       </div>
       {children}
     </section>
@@ -1599,7 +1810,7 @@ function DashboardCard({
 }
 function ChartEmpty({ text }: { text: string }) {
   return (
-    <div className="grid h-28 place-items-center rounded-xl border border-dashed border-border bg-muted/20 p-3 text-center text-xs text-muted-foreground">
+    <div className="grid h-28 place-items-center rounded-xl border border-dashed border-border bg-muted/20 p-3 text-center text-sm text-muted-foreground">
       {text}
     </div>
   );
@@ -1615,8 +1826,8 @@ function Attention({
 }) {
   return (
     <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-3 py-1.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`font-display text-xl font-bold ${tone}`}>{value}</p>
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className={`font-display text-2xl font-bold ${tone}`}>{value}</p>
     </div>
   );
 }
@@ -3958,18 +4169,15 @@ function Kpi({ label, value }: { label: string; value: number }) {
   return (
     <section className="min-w-0 rounded-2xl border border-slate-200 bg-card p-2.5 shadow-soft">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-medium leading-3 text-muted-foreground">
+        <p className="text-xs font-medium leading-4 text-muted-foreground">
           {label}
         </p>
-        <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg ${item.tone}`}>
-          <Icon className="h-3.5 w-3.5" />
+        <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${item.tone}`}>
+          <Icon className="h-4 w-4" />
         </span>
       </div>
-      <p className="mt-2 font-display text-xl font-bold leading-none text-slate-800">
+      <p className="mt-2 font-display text-2xl font-bold leading-none text-slate-800">
         {value}
-      </p>
-      <p className="mt-1 truncate text-[10px] font-medium text-muted-foreground">
-        {item.hint}
       </p>
     </section>
   );
