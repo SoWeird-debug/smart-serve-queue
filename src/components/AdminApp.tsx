@@ -155,7 +155,7 @@ export function AdminApp({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const store = usePrototypeStore();
   const fillsWorkspace =
-    page === "overview" || page === "trends" || page === "analytics";
+    page === "overview" || page === "trends" || page === "analytics" || page === "users";
   const isSettingsPage = settingsNav.some(([id]) => id === page);
   const selectPage = (nextPage: Page) => {
     setPage(nextPage);
@@ -3815,24 +3815,25 @@ function StaffPage({
   );
 
   return (
-    <>
-      <Head
-        title="Staff & roles"
-        sub="Simple role-based login accounts. Only doctors publish an availability status to patients."
-        action={
-          <div className="flex items-center gap-2">
-            <Button size="icon" variant="outline" onClick={() => openCreate("staff")} title="Create staff account" aria-label="Create staff account">
-              <UserPlus className="h-4 w-4" />
-            </Button>
-            <Button size="icon" variant="outline" onClick={() => openCreate("doctor")} title="Create doctor account" aria-label="Create doctor account">
-              <Stethoscope className="h-4 w-4" />
-            </Button>
-            <Button size="icon" onClick={() => openCreate("admin")} title="Set up administrator" aria-label="Set up administrator">
-              <ShieldCheck className="h-4 w-4" />
-            </Button>
-          </div>
-        }
-      />
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0">
+        <Head
+          title="Staff & roles"
+          sub="Simple role-based login accounts. Only doctors publish an availability status to patients."
+          action={
+            <div className="flex items-center gap-2">
+              <Button size="icon" variant="outline" onClick={() => openCreate("staff")} title="Create staff account" aria-label="Create staff account">
+                <UserPlus className="h-4 w-4" />
+              </Button>
+              <Button size="icon" variant="outline" onClick={() => openCreate("doctor")} title="Create doctor account" aria-label="Create doctor account">
+                <Stethoscope className="h-4 w-4" />
+              </Button>
+              <Button size="icon" onClick={() => openCreate("admin")} title="Set up administrator" aria-label="Set up administrator">
+                <ShieldCheck className="h-4 w-4" />
+              </Button>
+            </div>
+          }
+        />
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
           <p className="text-xs font-semibold text-primary">Staff accounts</p>
@@ -3847,8 +3848,10 @@ function StaffPage({
           <p className="mt-1 text-xs text-muted-foreground">Adds recovery and internal contact details for secure setup.</p>
         </div>
       </div>
+      </div>
       <Panel
         title="Account directory"
+        className="mb-0 flex min-h-0 flex-1 flex-col"
         action={
           <div className="flex items-center gap-2">
             <div className="relative hidden sm:block">
@@ -3864,14 +3867,15 @@ function StaffPage({
           </div>
         }
       >
-        <div className="hidden border-b border-border bg-muted/30 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground xl:grid xl:grid-cols-[minmax(210px,1.3fr)_minmax(125px,0.75fr)_minmax(120px,0.75fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(110px,0.7fr)_auto] xl:gap-3">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="sticky top-0 z-10 hidden border-b border-border bg-muted/95 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground xl:grid xl:grid-cols-[minmax(210px,1.3fr)_minmax(125px,0.75fr)_minmax(120px,0.75fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(110px,0.7fr)_auto] xl:gap-3">
           <span>Account holder</span>
           <span>Username</span>
           <span>Account status</span>
           <span>Doctor availability</span>
           <span>Assignment</span>
           <span>Role</span>
-          <span className="text-center">Actions</span>
+          <span className="text-center">Edit</span>
         </div>
         {visibleUsers.map((user) => {
           const initials = user.fullName
@@ -3898,24 +3902,14 @@ function StaffPage({
               <Badge className={`w-fit border-0 ${availabilityTone}`}>{availability}</Badge>
               <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><MapPin className="h-4 w-4 text-primary" />{user.assignedAreas?.includes("Animal Bite Center") ? "Animal Bite Center" : "General Clinic"}</span>
               <Badge className="w-fit border-0 bg-primary-soft text-primary">{user.role}</Badge>
-              <div className="flex flex-wrap gap-1.5 xl:flex-nowrap">
-                <Button size="icon" variant="outline" onClick={() => openEdit(user)} title="Edit account" aria-label={`Edit ${user.fullName}`}>
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button size="icon" variant="outline" onClick={() => openReset(user)} title="Reset temporary password" aria-label={`Reset password for ${user.fullName}`}>
-                  <KeyRound className="h-4 w-4" />
-                </Button>
-                <Button size="icon" variant="outline" onClick={() => update(user.id, { active: !user.active })} title={user.active ? "Disable account" : "Enable account"} aria-label={user.active ? `Disable ${user.fullName}` : `Enable ${user.fullName}`}>
-                  <ShieldCheck className={`h-4 w-4 ${user.active ? "text-secondary" : "text-muted-foreground"}`} />
-                </Button>
-                <Button size="icon" variant="destructive" onClick={() => window.confirm(`Delete ${user.fullName}? This removes their local login.`) && remove(user.id)} title="Delete account" aria-label={`Delete ${user.fullName}`}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+              <Button size="icon" variant="outline" onClick={() => openEdit(user)} title="Edit account" aria-label={`Edit ${user.fullName}`}>
+                <Pencil className="h-4 w-4" />
+              </Button>
             </div>
           );
         })}
         {!visibleUsers.length ? <Empty text={users.length ? "No accounts match your search." : "No login accounts yet. Select an icon above to create staff, doctor, or administrator access."} /> : null}
+        </div>
       </Panel>
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && close()}>
         <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto rounded-2xl p-0">
@@ -3968,10 +3962,12 @@ function StaffPage({
                     </div>
                   </div>
                 ) : null}
-                <label className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 text-sm">
-                  <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
-                  Account is active and can sign in
-                </label>
+                {dialog !== "edit" ? (
+                  <label className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 text-sm">
+                    <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
+                    Account is active and can sign in
+                  </label>
+                ) : null}
               </>
             )}
             {(dialog !== "edit" || dialog === "reset") ? (
@@ -3989,12 +3985,38 @@ function StaffPage({
             {error ? <p role="alert" className="rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
           </div>
           <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
+            {dialog === "edit" && selected ? (
+              <div className="mr-auto flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => openReset(selected)}>
+                  <KeyRound className="mr-2 h-4 w-4" />Reset password
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={form.active ? "text-secondary" : "text-muted-foreground"}
+                  onClick={() => setForm({ ...form, active: !form.active })}
+                >
+                  <ShieldCheck className="mr-2 h-4 w-4" />{form.active ? "Active" : "Disabled"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => {
+                    if (!window.confirm(`Delete ${selected.fullName}? This removes their local login.`)) return;
+                    remove(selected.id);
+                    close();
+                  }}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />Delete
+                </Button>
+              </div>
+            ) : null}
             <Button variant="outline" onClick={close}>Cancel</Button>
             <Button onClick={save}><KeyRound className="mr-2 h-4 w-4" />{dialog === "edit" ? "Save account" : dialog === "reset" ? "Save temporary password" : "Create account"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }
 
