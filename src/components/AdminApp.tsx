@@ -94,7 +94,7 @@ type Page =
   | "analytics"
   | "reports";
 const workspaceNav: [Page, string, any][] = [
-  ["overview", "Overview", LayoutDashboard],
+  ["overview", "Dashboard", LayoutDashboard],
   ["appointments", "Appointments", Calendar],
   ["patients", "Patient Records", Users],
   ["trends", "Disease Trends", TrendingUp],
@@ -2109,6 +2109,20 @@ function PatientPage({
   });
   const barangays = useMemo(() => {
     const directory = new Map<string, any>();
+    barangayEntries.forEach((entry: any) => {
+      const name = entry.name?.trim();
+      const municipality = entry.municipality?.trim();
+      if (!name || !municipality) return;
+      const key = `${normalizeBarangayName(municipality)}::${normalizeBarangayName(name)}`;
+      directory.set(key, {
+        key,
+        name,
+        municipality,
+        province: entry.province?.trim() || "Isabela",
+        postalCode: entry.postalCode?.trim() || "",
+        count: 0,
+      });
+    });
     patients.forEach((patient: any) => {
       const name = patient.barangay?.trim() || "Unspecified barangay";
       const municipality = patient.municipality?.trim() || "Unspecified municipality";
@@ -2233,7 +2247,20 @@ function PatientPage({
         sub="Barangays appear automatically after a patient registers there."
       />
       {!selectedBarangayKey ? (
-        <Panel title={`Barangay directory (${barangays.length})`}>
+        <Panel
+          title={`Barangay directory (${barangays.length})`}
+          action={
+            <Button
+              type="button"
+              size="icon"
+              aria-label="Add barangay"
+              title="Add barangay"
+              onClick={() => openBarangayEditor()}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          }
+        >
           <div className="mb-4 max-w-md">
             <Label htmlFor="barangay-search">Search barangay</Label>
             <Input
