@@ -8,6 +8,8 @@ import {
   DatabaseZap,
   Download,
   Eye,
+  FileText,
+  Folder,
   KeyRound,
   LayoutDashboard,
   ListFilter,
@@ -88,7 +90,9 @@ type Page =
   | "inventory"
   | "users"
   | "cast"
-  | "settings";
+  | "settings"
+  | "analytics"
+  | "reports";
 const workspaceNav: [Page, string, any][] = [
   ["overview", "Overview", LayoutDashboard],
   ["appointments", "Appointments", Calendar],
@@ -97,6 +101,8 @@ const workspaceNav: [Page, string, any][] = [
 ];
 const settingsNav: [Page, string, any][] = [
   ["settings", "System & data", Settings],
+  ["analytics", "Analytics", TrendingUp],
+  ["reports", "Reports", FileText],
   ["services", "Services & schedules", Stethoscope],
   ["consultationTemplates", "Consultation templates", ClipboardPlus],
   ["inventory", "Inventory", Package],
@@ -147,7 +153,8 @@ export function AdminApp({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const store = usePrototypeStore();
-  const fillsWorkspace = page === "overview" || page === "trends";
+  const fillsWorkspace =
+    page === "overview" || page === "trends" || page === "analytics";
   const isSettingsPage = settingsNav.some(([id]) => id === page);
   const selectPage = (nextPage: Page) => {
     setPage(nextPage);
@@ -376,7 +383,6 @@ function PageContent({ page, store }: any) {
         appointments={appointments}
         patients={patients}
         update={store.updateAppointment}
-        remove={store.deleteAppointment}
       />
     );
   if (page === "services")
@@ -408,6 +414,8 @@ function PageContent({ page, store }: any) {
     );
   if (page === "cast") return <CastCenter />;
   if (page === "settings") return <SettingsPage store={store} />;
+  if (page === "analytics") return <AnalyticsPage store={store} />;
+  if (page === "reports") return <ReportsPage store={store} />;
   if (page === "inventory")
     return (
       <MedicinePage
@@ -912,10 +920,10 @@ function OverviewDashboard({ store }: any) {
       <section className="mb-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1
-            className="min-w-0 flex-1 truncate font-display text-lg font-bold tracking-tight text-slate-800 xl:text-xl"
-            title="An integrated web application for service booking with Disease trend monitoring in Super Health Center of Jones, Isabela"
+            className="min-w-0 flex-1 truncate font-display text-sm font-bold tracking-tight text-slate-800 xl:text-base"
+            title="AN INTEGRATED WEB APPLICATION FOR SERVICE BOOKING WITH DISEASE TREND MONITORING IN SUPER HEALTH CENTER OF JONES, ISABELA"
           >
-            An integrated web application for service booking with Disease trend monitoring in Super Health Center of Jones, Isabela
+            AN INTEGRATED WEB APPLICATION FOR SERVICE BOOKING WITH DISEASE TREND MONITORING IN SUPER HEALTH CENTER OF JONES, ISABELA
           </h1>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {activeFilterCount ? (
@@ -1306,6 +1314,223 @@ function OverviewDashboard({ store }: any) {
     </div>
   );
 }
+function AnalyticsPage({ store }: any) {
+  const { appointments = [], medicalRecords = [], medicines = [], patients = [], services = [], staffUsers = [] } = store;
+  const [range, setRange] = useState("all");
+  const [area, setArea] = useState("all");
+  const cutoff = useMemo(() => {
+    if (range === "all") return "";
+    const date = new Date();
+    date.setDate(date.getDate() - Number(range) + 1);
+    return date.toISOString().slice(0, 10);
+  }, [range]);
+  const serviceById = useMemo(
+    () => new Map(services.map((service: any) => [service.id, service])),
+    [services],
+  );
+  const matchesArea = useCallback(
+    (item: any) => {
+      if (area === "all") return true;
+      const service = serviceById.get(item.serviceId);
+      return (item.careArea || item.queueArea || service?.queueArea || "General Clinic") === area;
+    },
+    [area, serviceById],
+  );
+  const filteredAppointments = useMemo(
+    () => appointments.filter((item: any) => (!cutoff || item.date >= cutoff) && matchesArea(item)),
+    [appointments, cutoff, matchesArea],
+  );
+  const filteredRecords = useMemo(
+    () => medicalRecords.filter((item: any) => (!cutoff || item.date >= cutoff) && matchesArea(item)),
+    [medicalRecords, cutoff, matchesArea],
+  );
+  const activity = useMemo(() => {
+    const dates = Array.from(
+      new Set([...filteredAppointments, ...filteredRecords].map((item: any) => item.date).filter(Boolean)),
+    ).sort();
+    return dates.map((date) => ({
+      date: new Date(`${date}T00:00:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric" }),
+      appointments: filteredAppointments.filter((item: any) => item.date === date).length,
+      completed: filteredRecords.filter((item: any) => item.date === date).length,
+    }));
+  }, [filteredAppointments, filteredRecords]);
+  const serviceData = useMemo(
+    () => services
+      .map((service: any) => ({
+        name: serviceAcronym(service.name),
+        fullName: service.name,
+        visits: filteredAppointments.filter((item: any) => item.serviceId === service.id).length,
+      }))
+      .filter((item: any) => item.visits > 0)
+      .sort((a: any, b: any) => b.visits - a.visits)
+      .slice(0, 6),
+    [services, filteredAppointments],
+  );
+  const workflowData = useMemo(() => Object.entries(
+    filteredAppointments.reduce((counts: Record<string, number>, item: any) => {
+      const status = item.queueStatus || "Scheduled";
+      counts[status] = (counts[status] || 0) + 1;
+      return counts;
+    }, {}),
+  ).map(([name, value], index) => ({ name, value, color: dashboardChartColors[index % dashboardChartColors.length] })), [filteredAppointments]);
+  const diagnosisData = useMemo(() => Object.entries(
+    filteredRecords.reduce((counts: Record<string, number>, item: any) => {
+      const diagnosis = item.diagnosis?.trim() || "Not recorded";
+      counts[diagnosis] = (counts[diagnosis] || 0) + 1;
+      return counts;
+    }, {}),
+  ).map(([name, value]) => ({ name, code: diagnosisAcronym(name), value }))
+    .sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 6), [filteredRecords]);
+  const waiting = filteredAppointments.filter((item: any) => ["Waiting", "Waiting for Triage", "Triage", "Waiting for Doctor", "Called", "In Consultation", "Now Serving"].includes(item.queueStatus)).length;
+  const present = filteredAppointments.filter((item: any) => item.attendanceStatus === "Present").length;
+  const lowStock = medicines.filter((item: any) => item.stock <= item.reorderLevel).length;
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden [&>div:first-child]:mb-0">
+      <Head
+        title="Analytics"
+        sub="Live service, queue, consultation, and stock performance summary."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <select value={range} onChange={(event) => setRange(event.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-sm font-medium">
+              <option value="all">All recorded dates</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+            </select>
+            <select value={area} onChange={(event) => setArea(event.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-sm font-medium">
+              <option value="all">All care areas</option>
+              <option value="General Clinic">General Clinic</option>
+              <option value="Animal Bite Center">Animal Bite Center</option>
+            </select>
+          </div>
+        }
+      />
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
+        <Kpi label="Filtered appointments" value={filteredAppointments.length} />
+        <Kpi label="Present check-ins" value={present} />
+        <Kpi label="Completed checkups" value={filteredRecords.length} />
+        <Kpi label="Currently in queue" value={waiting} />
+        <Kpi label="Low-stock medicines" value={lowStock} />
+        <Kpi label="Active staff accounts" value={staffUsers.filter((item: any) => item.active).length} />
+      </div>
+      <div className="grid min-h-0 flex-1 grid-rows-4 gap-3 xl:grid-cols-2 xl:grid-rows-2">
+        <Panel title="Appointment activity" className="mb-0 flex h-full min-h-0 flex-col p-4">
+          <div className="min-h-0 flex-1">
+            {activity.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={activity}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="date" fontSize={12} /><YAxis allowDecimals={false} fontSize={12} /><Tooltip /><Line type="monotone" dataKey="appointments" name="Appointments" stroke="#0ea5e9" strokeWidth={3} /><Line type="monotone" dataKey="completed" name="Completed checkups" stroke="#16a34a" strokeWidth={3} /></LineChart></ResponsiveContainer> : <Empty text="No activity matches the selected filters." />}
+          </div>
+        </Panel>
+        <Panel title="Visit workflow" className="mb-0 flex h-full min-h-0 flex-col p-4">
+          <div className="flex min-h-0 flex-1 items-center">
+            {workflowData.length ? <><div className="h-full w-3/5"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={workflowData} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={3}>{workflowData.map((item: any) => <Cell key={item.name} fill={item.color} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div><div className="space-y-2 text-sm">{workflowData.slice(0, 5).map((item: any) => <div key={item.name} className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} /><span className="max-w-36 truncate">{item.name}</span><b>{item.value}</b></div>)}</div></> : <Empty text="No queue workflow data matches the selected filters." />}
+          </div>
+        </Panel>
+        <Panel title="Service utilization" className="mb-0 flex h-full min-h-0 flex-col p-4">
+          <div className="min-h-0 flex-1">
+            {serviceData.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={serviceData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" fontSize={12} /><YAxis allowDecimals={false} fontSize={12} /><Tooltip formatter={(value: any, _name: any, context: any) => [value, context?.payload?.fullName || "Visits"]} /><Bar dataKey="visits" name="Visits" fill="#0ea5e9" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer> : <Empty text="No service visits match the selected filters." />}
+          </div>
+        </Panel>
+        <Panel title="Cases by diagnosis" className="mb-0 flex h-full min-h-0 flex-col p-4">
+          <div className="min-h-0 flex-1">
+            {diagnosisData.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={diagnosisData} layout="vertical" margin={{ left: 8 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} /><XAxis type="number" allowDecimals={false} fontSize={12} /><YAxis type="category" dataKey="code" width={45} fontSize={12} /><Tooltip formatter={(value: any, _name: any, context: any) => [value, context?.payload?.name || "Cases"]} /><Bar dataKey="value" name="Cases" fill="#8b5cf6" radius={[0, 6, 6, 0]} /></BarChart></ResponsiveContainer> : <Empty text="No completed diagnoses match the selected filters." />}
+          </div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+type ReportKind = "appointments" | "patients" | "consultations" | "disease" | "inventory" | "audit";
+const reportLabels: Record<ReportKind, string> = {
+  appointments: "Appointment register",
+  patients: "Patient registry",
+  consultations: "Consultation register",
+  disease: "Disease trend summary",
+  inventory: "Inventory stock report",
+  audit: "Operational audit trail",
+};
+
+function ReportsPage({ store }: any) {
+  const [kind, setKind] = useState<ReportKind>("appointments");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [area, setArea] = useState("all");
+  const { appointments = [], patients = [], medicalRecords = [], medicines = [], audit = [], services = [] } = store;
+  const patientById = useMemo(() => new Map(patients.map((item: any) => [item.id, item])), [patients]);
+  const serviceById = useMemo(() => new Map(services.map((item: any) => [item.id, item])), [services]);
+  const inRange = (date: string) => (!from || date >= from) && (!to || date <= to);
+  const matchesArea = (item: any) => area === "all" || (item.careArea || item.queueArea || serviceById.get(item.serviceId)?.queueArea || "General Clinic") === area;
+  const report = useMemo(() => {
+    if (kind === "appointments") {
+      const rows = appointments.filter((item: any) => inRange(item.date) && matchesArea(item)).map((item: any) => {
+        const patient = patientById.get(item.patientId);
+        const service = serviceById.get(item.serviceId);
+        return [item.date, item.timeSlot, patient?.patientNumber || "—", patient?.fullName || "Unknown patient", service?.name || "Unknown service", item.visitType || "Scheduled", item.attendanceStatus, item.queueNumber || "—", item.queueStatus, item.queueArea || service?.queueArea || "General Clinic"];
+      });
+      return { headers: ["Date", "Time", "Patient no.", "Patient name", "Service", "Visit type", "Attendance", "Queue no.", "Queue status", "Care area"], rows };
+    }
+    if (kind === "patients") {
+      const rows = patients.map((item: any) => [item.patientNumber || item.id, item.fullName, item.gender || "—", item.dob || "—", item.contact || "—", item.addressLine || item.address || "—", item.barangay || "—", item.municipality || "—", item.province || "Isabela", item.postalCode || "—"]);
+      return { headers: ["Patient no.", "Full name", "Sex", "Birth date", "Contact", "Address", "Barangay", "Municipality", "Province", "Postal code"], rows };
+    }
+    if (kind === "consultations") {
+      const rows = medicalRecords.filter((item: any) => inRange(item.date) && matchesArea(item)).map((item: any) => {
+        const patient = patientById.get(item.patientId);
+        return [item.date, patient?.patientNumber || "—", patient?.fullName || "Unknown patient", item.careArea || "General Clinic", item.diagnosis || "Not recorded", item.clinician || "—", item.status || "—", item.followUpPlan?.date || "—", item.followUpPlan?.type || "—", item.notes || "—"];
+      });
+      return { headers: ["Date", "Patient no.", "Patient name", "Care area", "Diagnosis", "Clinician", "Dispensing status", "Follow-up date", "Follow-up type", "Clinical notes"], rows };
+    }
+    if (kind === "disease") {
+      const grouped = medicalRecords.filter((item: any) => inRange(item.date) && matchesArea(item)).reduce((result: Record<string, any>, item: any) => {
+        const patient = patientById.get(item.patientId);
+        const key = [item.diagnosis || "Not recorded", patient?.barangay || "Not recorded", patient?.municipality || "Not recorded"].join("|");
+        if (!result[key]) result[key] = [item.diagnosis || "Not recorded", patient?.barangay || "Not recorded", patient?.municipality || "Not recorded", 0];
+        result[key][3] += 1;
+        return result;
+      }, {});
+      return { headers: ["Diagnosis", "Barangay", "Municipality", "Completed cases"], rows: Object.values(grouped).sort((a: any, b: any) => b[3] - a[3]) };
+    }
+    if (kind === "inventory") {
+      const rows = medicines.slice().sort((a: any, b: any) => a.name.localeCompare(b.name)).map((item: any) => [item.name, item.strength || "—", item.form || "—", item.category || "Medicine", item.inventoryArea || "General Pharmacy", item.stock, item.reorderLevel, item.stock <= item.reorderLevel ? "Low stock" : "In stock", item.batch || "—", item.expiry || "—", item.supplier || "—"]);
+      return { headers: ["Item", "Strength", "Form", "Category", "Location", "Current stock", "Reorder level", "Stock status", "Batch", "Expiry", "Supplier"], rows };
+    }
+    const rows = audit.filter((item: any) => inRange(item.at?.slice(0, 10) || "")).map((item: any) => [item.at, item.role, item.action, item.reference]);
+    return { headers: ["Recorded at", "Role", "Action", "Reference"], rows };
+  }, [kind, appointments, patients, medicalRecords, medicines, audit, from, to, area, patientById, serviceById]);
+  const download = () => {
+    const csv = [report.headers, ...report.rows].map((row: any[]) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+    const file = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `smartserve-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div>
+      <style>{`@page { size: A4 landscape; margin: 12mm; } @media print { aside, .no-print { display: none !important; } main { height: auto !important; overflow: visible !important; padding: 0 !important; background: white !important; } .print-report { border: 0 !important; box-shadow: none !important; } .report-metadata { display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)) !important; gap: 8px !important; } .report-table { min-width: 0 !important; table-layout: fixed !important; font-size: 8px !important; } .report-table th, .report-table td { white-space: normal !important; overflow-wrap: anywhere !important; padding: 5px !important; } .report-table tr { break-inside: avoid; } }`}</style>
+      <div className="no-print mb-4 flex flex-wrap justify-end gap-2">
+        <label className="sr-only" htmlFor="report-content">Report content</label>
+        <select id="report-content" value={kind} onChange={(event) => setKind(event.target.value as ReportKind)} className="h-10 rounded-xl border border-border bg-card px-3 text-sm font-medium">
+          <option value="appointments">Appointment register</option>
+          <option value="patients">Patient registry</option>
+          <option value="consultations">Consultation register</option>
+          <option value="disease">Disease trend summary</option>
+          <option value="inventory">Inventory stock report</option>
+          <option value="audit">Operational audit trail</option>
+        </select>
+        <Button variant="outline" onClick={() => window.print()}><FileText className="mr-2 h-4 w-4" />Print report</Button>
+        <Button onClick={download}><Download className="mr-2 h-4 w-4" />Export CSV</Button>
+      </div>
+      <section className="print-report overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
+        <div className="border-b border-border px-6 py-5"><div className="flex flex-wrap items-center justify-between gap-5"><div className="flex items-center gap-4"><img src={superHealthCenterLogo} alt="Jones Super Health Center seal" className="h-20 w-20 shrink-0 object-contain" /><div><p className="text-sm font-bold uppercase tracking-[.12em] text-primary">Super Health Center of Jones, Isabela</p><p className="mt-1 text-sm text-muted-foreground">Municipality of Jones · Province of Isabela</p><h2 className="mt-2 font-display text-2xl font-bold">{reportLabels[kind]}</h2></div></div><div className="flex items-center gap-3 text-right"><div><p className="text-sm font-bold uppercase tracking-[.1em] text-slate-700">Department of Health</p><p className="mt-1 text-xs text-muted-foreground">Republic of the Philippines</p></div><span className="grid h-14 w-14 place-items-center rounded-full border-2 border-primary/30 bg-primary-soft text-primary"><ShieldCheck className="h-7 w-7" aria-label="Department of Health identifier" /></span></div></div><div className="report-metadata mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4"><div className="rounded-lg bg-muted px-3 py-2"><p className="text-xs text-muted-foreground">Date range</p><p className="mt-1 text-sm font-semibold">{from || "All recorded dates"}{to ? ` to ${to}` : ""}</p></div><div className="rounded-lg bg-muted px-3 py-2"><p className="text-xs text-muted-foreground">Care area</p><p className="mt-1 text-sm font-semibold">{area === "all" ? "All care areas" : area}</p></div><div className="rounded-lg bg-muted px-3 py-2"><p className="text-xs text-muted-foreground">Records included</p><p className="mt-1 text-sm font-semibold">{report.rows.length}</p></div><div className="rounded-lg bg-muted px-3 py-2"><p className="text-xs text-muted-foreground">Generated</p><p className="mt-1 text-sm font-semibold">{new Date().toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}</p></div></div></div>
+        <div className="overflow-x-auto"><table className="report-table w-full min-w-[760px] text-left text-sm"><thead className="bg-muted text-xs uppercase tracking-wide text-muted-foreground"><tr>{report.headers.map((header: string) => <th key={header} className="whitespace-nowrap px-4 py-3 font-semibold">{header}</th>)}</tr></thead><tbody>{report.rows.length ? report.rows.map((row: any[], index: number) => <tr key={index} className="border-t border-border align-top">{row.map((cell: any, cellIndex: number) => <td key={cellIndex} className="max-w-72 px-4 py-3 leading-5">{String(cell ?? "—")}</td>)}</tr>) : <tr><td colSpan={report.headers.length} className="px-4 py-10 text-center text-muted-foreground">No records match the selected filters.</td></tr>}</tbody></table></div>
+        <div className="border-t border-border px-6 py-3 text-xs text-muted-foreground">Confidential clinic record. Handle and store this report according to clinic privacy procedures.</div>
+      </section>
+    </div>
+  );
+}
+
 function SettingsPage({ store }: any) {
   const [importOpen, setImportOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
@@ -1869,7 +2094,7 @@ function PatientPage({
   const [selected, setSelected] = useState<any>(null);
   const [editing, setEditing] = useState(false);
   const [barangayQuery, setBarangayQuery] = useState("");
-  const [selectedBarangay, setSelectedBarangay] = useState("");
+  const [selectedBarangayKey, setSelectedBarangayKey] = useState("");
   const [patientQuery, setPatientQuery] = useState("");
   const [barangayEditorOpen, setBarangayEditorOpen] = useState(false);
   const [editingBarangay, setEditingBarangay] = useState<any>(null);
@@ -1884,20 +2109,16 @@ function PatientPage({
   });
   const barangays = useMemo(() => {
     const directory = new Map<string, any>();
-    (barangayEntries || []).forEach((entry: any) => {
-      const key = normalizeBarangayName(entry.name);
-      if (!key) return;
-      directory.set(key, { ...entry, key, count: 0 });
-    });
     patients.forEach((patient: any) => {
       const name = patient.barangay?.trim() || "Unspecified barangay";
-      const key = normalizeBarangayName(name);
+      const municipality = patient.municipality?.trim() || "Unspecified municipality";
+      const key = `${normalizeBarangayName(municipality)}::${normalizeBarangayName(name)}`;
       const existing = directory.get(key);
       directory.set(key, {
         ...existing,
         key,
         name: existing?.name || name,
-        municipality: existing?.municipality || patient.municipality || "",
+        municipality: existing?.municipality || municipality,
         province: existing?.province || patient.province || "",
         postalCode: existing?.postalCode || patient.postalCode || "",
         count: (existing?.count || 0) + 1,
@@ -1914,9 +2135,9 @@ function PatientPage({
   const visiblePatients = patients
     .filter(
       (patient: any) =>
-        (!selectedBarangay ||
-          normalizeBarangayName(patient.barangay) ===
-            normalizeBarangayName(selectedBarangay)) &&
+        (!selectedBarangayKey ||
+          `${normalizeBarangayName(patient.municipality || "Unspecified municipality")}::${normalizeBarangayName(patient.barangay || "Unspecified barangay")}` ===
+            selectedBarangayKey) &&
         [patient.fullName, patient.patientNumber, patient.contact]
           .filter(Boolean)
           .join(" ")
@@ -1926,6 +2147,7 @@ function PatientPage({
     .sort((left: any, right: any) =>
       left.fullName.localeCompare(right.fullName, "en-PH"),
     );
+  const selectedBarangay = barangays.find((barangay) => barangay.key === selectedBarangayKey);
   const openPatient = (patient: any) => {
     setSelected({ ...patient });
     setEditing(false);
@@ -2008,23 +2230,10 @@ function PatientPage({
     <>
       <Head
         title="Patient records"
-        sub="Choose a barangay to find and open a private patient record."
+        sub="Barangays appear automatically after a patient registers there."
       />
-      {!selectedBarangay ? (
-        <Panel
-          title={`Barangay directory (${barangays.length})`}
-          action={
-            <Button
-              type="button"
-              size="icon"
-              title="Add barangay"
-              aria-label="Add barangay"
-              onClick={() => openBarangayEditor()}
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-          }
-        >
+      {!selectedBarangayKey ? (
+        <Panel title={`Barangay directory (${barangays.length})`}>
           <div className="mb-4 max-w-md">
             <Label htmlFor="barangay-search">Search barangay</Label>
             <Input
@@ -2035,11 +2244,6 @@ function PatientPage({
               className="mt-1"
             />
           </div>
-          {directoryNotice ? (
-            <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-              {directoryNotice}
-            </p>
-          ) : null}
           {visibleBarangays.length ? (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {visibleBarangays.map((barangay) => (
@@ -2050,7 +2254,7 @@ function PatientPage({
                   <button
                     type="button"
                     onClick={() => {
-                      setSelectedBarangay(barangay.name);
+                      setSelectedBarangayKey(barangay.key);
                       setPatientQuery("");
                     }}
                     className="min-w-0 flex-1 px-1 py-1 text-left"
@@ -2065,33 +2269,6 @@ function PatientPage({
                   <Badge className="border-0 bg-card text-primary">
                     {barangay.count}
                   </Badge>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      title={`Edit ${barangay.name}`}
-                      aria-label={`Edit ${barangay.name}`}
-                      onClick={() => openBarangayEditor(barangay)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      title={
-                        barangay.count
-                          ? "Reassign patient records before deleting this barangay"
-                          : `Delete ${barangay.name}`
-                      }
-                      aria-label={`Delete ${barangay.name}`}
-                      disabled={barangay.count > 0}
-                      onClick={() => setDeletingBarangay(barangay)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                    </Button>
-                  </div>
                 </div>
               ))}
             </div>
@@ -2101,7 +2278,7 @@ function PatientPage({
         </Panel>
       ) : (
         <Panel
-          title={`Patients in ${selectedBarangay} (${visiblePatients.length})`}
+          title={`Patients in ${selectedBarangay?.name || "barangay"} (${visiblePatients.length})`}
           action={
             <Button
               type="button"
@@ -2110,7 +2287,7 @@ function PatientPage({
               aria-label="Close patient list and return to barangay directory"
               title="Return to barangay directory"
               onClick={() => {
-                setSelectedBarangay("");
+                setSelectedBarangayKey("");
                 setBarangayQuery("");
                 setPatientQuery("");
               }}
@@ -2578,46 +2755,158 @@ function PatientPage({
     </>
   );
 }
-function AppointmentPage({ appointments, patients, update, remove }: any) {
+function AppointmentPage({ appointments, patients, update }: any) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const filteredAppointments = useMemo(
+    () =>
+      appointments.filter((appointment: any) => {
+        if (from && appointment.date < from) return false;
+        if (to && appointment.date > to) return false;
+        return true;
+      }),
+    [appointments, from, to],
+  );
+  const groupedByDate = useMemo(() => {
+    const dates = new Map<string, Map<string, any[]>>();
+    filteredAppointments.forEach((appointment: any) => {
+      const patient = patients.find((item: any) => item.id === appointment.patientId);
+      const barangay = patient?.mobileLocationBarangay || patient?.barangay || "Barangay not recorded";
+      if (!dates.has(appointment.date)) dates.set(appointment.date, new Map());
+      const barangays = dates.get(appointment.date)!;
+      if (!barangays.has(barangay)) barangays.set(barangay, []);
+      barangays.get(barangay)!.push(appointment);
+    });
+    return [...dates.entries()]
+      .sort(([first], [second]) => first.localeCompare(second))
+      .map(([date, barangays]) => ({
+        date,
+        barangays: [...barangays.entries()].sort(([first], [second]) =>
+          first.localeCompare(second),
+        ),
+      }));
+  }, [filteredAppointments, patients]);
+  const clearFilters = () => {
+    setFrom("");
+    setTo("");
+  };
+  const formatDate = (date: string) =>
+    new Intl.DateTimeFormat("en-PH", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(`${date}T00:00:00`));
   return (
     <>
       <Head
         title="Appointments"
-        sub="View, reschedule, change status, or delete local visits."
+        sub="View and manage scheduled visits by date and barangay."
+        action={
+          <div className="flex items-center gap-2">
+            {from || to ? (
+              <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setFiltersOpen((open) => !open)}
+              aria-expanded={filtersOpen}
+              aria-controls="appointment-filters"
+            >
+              <ListFilter className="mr-2 h-4 w-4" />
+              {filtersOpen ? "Hide filter" : "Filter dates"}
+            </Button>
+          </div>
+        }
       />
-      <Panel title="Visits">
-        {appointments.map((a: any) => (
-          <Row
-            key={a.id}
-            title={`${patients.find((p: any) => p.id === a.patientId)?.fullName || "Unknown patient"} · ${a.queueNumber || "No number"}`}
-            detail={`${a.date} · ${a.queueStatus}`}
-            badge={a.visitType || "Scheduled"}
-            actions={
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    const date = window.prompt("Date (YYYY-MM-DD)", a.date);
-                    if (date) update(a.id, { date });
-                  }}
-                >
-                  Reschedule
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() =>
-                    window.confirm("Delete visit?") && remove(a.id)
-                  }
-                >
-                  Delete
-                </Button>
-              </>
-            }
-          />
-        ))}
-        {!appointments.length && <Empty text="No visits yet." />}
+      {filtersOpen ? (
+        <section
+          id="appointment-filters"
+          className="mb-5 rounded-2xl border border-border bg-card p-4 shadow-soft"
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <DateFilter label="From date" value={from} onChange={setFrom} />
+            <DateFilter label="To date" value={to} onChange={setTo} />
+          </div>
+        </section>
+      ) : null}
+      <Panel title={`Visits · ${filteredAppointments.length} appointment${filteredAppointments.length === 1 ? "" : "s"}`}>
+        {groupedByDate.length ? (
+          <div className="space-y-5">
+            {groupedByDate.map(({ date, barangays }) => (
+              <section key={date}>
+                <div className="mb-2 flex items-center justify-between gap-3 border-b border-border pb-2">
+                  <h3 className="font-display text-lg font-bold">{formatDate(date)}</h3>
+                  <Badge variant="secondary">
+                    {barangays.reduce((total, [, items]) => total + items.length, 0)} appointment{barangays.reduce((total, [, items]) => total + items.length, 0) === 1 ? "" : "s"}
+                  </Badge>
+                </div>
+                <div className="space-y-2">
+                  {barangays.map(([barangay, items]) => {
+                    const folderKey = `${date}:${barangay}`;
+                    const expanded = expandedFolders[folderKey];
+                    return (
+                      <div key={folderKey} className="overflow-hidden rounded-xl border border-border">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedFolders((current) => ({
+                              ...current,
+                              [folderKey]: !current[folderKey],
+                            }))
+                          }
+                          aria-expanded={expanded}
+                          className="flex w-full items-center gap-3 bg-muted/30 px-4 py-3 text-left transition-colors hover:bg-muted/50"
+                        >
+                          <Folder className="h-5 w-5 shrink-0 text-primary" />
+                          <span className="min-w-0 flex-1 truncate font-semibold">{barangay}</span>
+                          <Badge className="border-0 bg-primary-soft text-primary">
+                            {items.length}
+                          </Badge>
+                          <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                        </button>
+                        {expanded ? (
+                          <div className="px-4">
+                            {items.map((appointment: any) => {
+                              const patient = patients.find((item: any) => item.id === appointment.patientId);
+                              return (
+                                <Row
+                                  key={appointment.id}
+                                  title={`${patient?.fullName || "Unknown patient"} · ${appointment.queueNumber || "No number"}`}
+                                  detail={`${appointment.timeSlot || "Time not set"} · ${appointment.queueStatus}`}
+                                  badge={appointment.visitType || "Scheduled"}
+                                  actions={
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => {
+                                        const nextDate = window.prompt("Date (YYYY-MM-DD)", appointment.date);
+                                        if (nextDate) update(appointment.id, { date: nextDate });
+                                      }}
+                                    >
+                                      Reschedule
+                                    </Button>
+                                  }
+                                />
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <Empty text={appointments.length ? "No visits match the selected date range." : "No visits yet."} />
+        )}
       </Panel>
     </>
   );
@@ -3703,10 +3992,35 @@ const csvValue = (value: string | number) =>
   `"${String(value).replaceAll('"', '""')}"`;
 
 function MedicinePage({ medicines, audit, add, update, remove }: any) {
-  const [name, setName] = useState("");
-  const [inventoryArea, setInventoryArea] = useState("General Pharmacy");
-  const [category, setCategory] = useState("Medicine");
+  const emptyMedicine = { name: "", strength: "", form: "Tablet", stock: 0, reorderLevel: 0, expiry: "", batch: "", inventoryArea: "General Pharmacy", category: "Medicine" };
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<any>(emptyMedicine);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [medicineQuery, setMedicineQuery] = useState("");
+  const openAdd = () => { setEditingId(null); setDraft({ ...emptyMedicine }); setEditorOpen(true); };
+  const openEdit = (medicine: any) => { setEditingId(medicine.id); setDraft({ ...emptyMedicine, ...medicine }); setEditorOpen(true); };
+  const saveMedicine = () => {
+    if (!draft.name.trim()) return;
+    const payload = { ...draft, name: draft.name.trim(), stock: Math.max(0, Number(draft.stock) || 0), reorderLevel: Math.max(0, Number(draft.reorderLevel) || 0), expiry: draft.expiry.trim() || "Not set", batch: draft.batch.trim() || "Not set" };
+    if (editingId) update(editingId, payload);
+    else add(payload);
+    setEditorOpen(false);
+  };
+  const visibleMedicines = medicines
+    .filter((medicine: any) =>
+      [medicine.name, medicine.strength, medicine.category, medicine.inventoryArea]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("en-PH")
+        .includes(medicineQuery.trim().toLocaleLowerCase("en-PH")),
+    )
+    .toSorted((left: any, right: any) =>
+      `${left.name} ${left.strength}`.localeCompare(`${right.name} ${right.strength}`, "en-PH"),
+    );
+  const lowStockMedicines = medicines
+    .filter((medicine: any) => medicine.stock <= (medicine.reorderLevel || 0))
+    .toSorted((left: any, right: any) => left.stock - right.stock || left.name.localeCompare(right.name, "en-PH"));
   if (historyOpen)
     return (
       <InventoryHistory
@@ -3723,21 +4037,7 @@ function MedicinePage({ medicines, audit, add, update, remove }: any) {
         action={
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              onClick={() => {
-                if (!name) return;
-                add({
-                  name,
-                  strength: "",
-                  form: "Tablet",
-                  stock: 0,
-                  reorderLevel: 0,
-                  expiry: "Not set",
-                  batch: "Not set",
-                  inventoryArea,
-                  category,
-                });
-                setName("");
-              }}
+              onClick={openAdd}
             >
               <Plus className="mr-2 h-4 w-4" />
               Add medicine
@@ -3752,50 +4052,51 @@ function MedicinePage({ medicines, audit, add, update, remove }: any) {
           </div>
         }
       />
-      <Input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="New medicine name"
-        className="mb-4"
-      />
-      <div className="mb-4 grid gap-3 sm:grid-cols-2">
-        <select aria-label="Inventory location" value={inventoryArea} onChange={(event) => setInventoryArea(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm"><option>General Pharmacy</option><option>Animal Bite Center</option></select>
-        <select aria-label="Inventory category" value={category} onChange={(event) => setCategory(event.target.value)} className="h-10 rounded-md border border-input bg-background px-3 text-sm"><option>Medicine</option><option>Vaccine</option><option>Immunoglobulin</option><option>Supply</option></select>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+        <Panel title={`Medicine items (${visibleMedicines.length})`}>
+          <div className="mb-4 max-w-xl">
+            <Label htmlFor="medicine-search">Search medicine</Label>
+            <Input id="medicine-search" value={medicineQuery} onChange={(event) => setMedicineQuery(event.target.value)} placeholder="Name, strength, category, or storage area" className="mt-1" />
+          </div>
+          {visibleMedicines.length ? visibleMedicines.map((m: any) => (
+            <div key={m.id} className="grid grid-cols-[2.5rem_minmax(0,1fr)_6rem_auto] items-center gap-3 border-b border-border py-3 last:border-0">
+              <Button size="icon" variant="ghost" aria-label={`Edit ${m.name}`} title="Edit medicine" onClick={() => openEdit(m)}><Pencil className="h-4 w-4" /></Button>
+              <div className="min-w-0"><p className="font-medium truncate">{m.name} {m.strength}</p><p className="text-xs text-muted-foreground">{m.form} · Batch {m.batch} · {m.inventoryArea || "General Pharmacy"}</p></div>
+              <div className="text-center"><p className="font-display text-lg font-bold">{m.stock}</p><p className="text-[11px] text-muted-foreground">in stock</p></div>
+              <Badge className="bg-primary-soft text-primary border-0">{m.category || "Medicine"}</Badge>
+            </div>
+          )) : <Empty text="No medicine matches your search." />}
+        </Panel>
+        <Panel title={`Low-stock medicines (${lowStockMedicines.length})`}>
+          <p className="mb-3 text-sm text-muted-foreground">Items at or below their reorder level. Select an item to update stock.</p>
+          {lowStockMedicines.length ? lowStockMedicines.map((m: any) => (
+            <button key={m.id} type="button" onClick={() => openEdit(m)} className="mb-2 flex w-full items-center justify-between gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-left transition-smooth hover:border-destructive/45">
+              <span className="min-w-0"><span className="block truncate font-medium">{m.name} {m.strength}</span><span className="text-xs text-muted-foreground">Reorder at {m.reorderLevel} · {m.inventoryArea || "General Pharmacy"}</span></span>
+              <span className="shrink-0 text-right"><span className="block font-display text-xl font-bold text-destructive">{m.stock}</span><span className="text-[11px] text-muted-foreground">in stock</span></span>
+            </button>
+          )) : <Empty text="All medicines are above their reorder levels." />}
+        </Panel>
       </div>
-      <Panel title="Medicine items">
-        {medicines.map((m: any) => (
-          <Row
-            key={m.id}
-            title={`${m.name} ${m.strength}`}
-            detail={`${m.form} · ${m.stock} in stock · Batch ${m.batch} · ${m.inventoryArea || "General Pharmacy"}`}
-            badge={m.category || "Medicine"}
-            actions={
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    const stock = window.prompt("Stock", String(m.stock));
-                    if (stock !== null)
-                      update(m.id, { stock: Number(stock) || 0 });
-                  }}
-                >
-                  Edit stock
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() =>
-                    window.confirm(`Delete ${m.name}?`) && remove(m.id)
-                  }
-                >
-                  Delete
-                </Button>
-              </>
-            }
-          />
-        ))}
-      </Panel>
+      <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>{editingId ? "Edit medicine" : "Add medicine"}</DialogTitle><DialogDescription>Record the medicine details, stock level, batch, expiry, and storage area.</DialogDescription></DialogHeader>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Medicine name" value={draft.name} onChange={(v) => setDraft((d: any) => ({ ...d, name: v }))} />
+            <Field label="Strength" value={draft.strength} onChange={(v) => setDraft((d: any) => ({ ...d, strength: v }))} />
+            <Field label="Form (tablet, vial, etc.)" value={draft.form} onChange={(v) => setDraft((d: any) => ({ ...d, form: v }))} />
+            <Field label="Batch / lot number" value={draft.batch} onChange={(v) => setDraft((d: any) => ({ ...d, batch: v }))} />
+            <Field label="Expiry date" value={draft.expiry} onChange={(v) => setDraft((d: any) => ({ ...d, expiry: v }))} />
+            <div><Label>Stock quantity</Label><Input type="number" min="0" value={draft.stock} onChange={(e) => setDraft((d: any) => ({ ...d, stock: e.target.value }))} className="mt-1" /></div>
+            <div><Label>Low-stock threshold</Label><Input type="number" min="0" value={draft.reorderLevel} onChange={(e) => setDraft((d: any) => ({ ...d, reorderLevel: e.target.value }))} className="mt-1" /></div>
+            <div><Label>Storage area</Label><select value={draft.inventoryArea} onChange={(e) => setDraft((d: any) => ({ ...d, inventoryArea: e.target.value }))} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>General Pharmacy</option><option>Animal Bite Center</option></select></div>
+            <div><Label>Category</Label><select value={draft.category} onChange={(e) => setDraft((d: any) => ({ ...d, category: e.target.value }))} className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option>Medicine</option><option>Vaccine</option><option>Immunoglobulin</option><option>Supply</option></select></div>
+          </div>
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+            {editingId ? <Button type="button" variant="destructive" onClick={() => { if (window.confirm(`Delete ${draft.name}?`)) { remove(editingId); setEditorOpen(false); } }}><Trash2 className="mr-2 h-4 w-4" />Delete</Button> : <span />}
+            <div className="flex gap-2"><Button type="button" variant="outline" onClick={() => setEditorOpen(false)}>Cancel</Button><Button type="button" onClick={saveMedicine} disabled={!draft.name.trim()}>Save medicine</Button></div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -4100,13 +4401,15 @@ function Panel({
   title,
   action,
   children,
+  className = "",
 }: {
   title: string;
   action?: any;
   children: any;
+  className?: string;
 }) {
   return (
-    <section className="mb-5 overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-soft">
+    <section className={`mb-5 overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-soft ${className}`}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <h3 className="font-display font-bold">{title}</h3>
         {action}

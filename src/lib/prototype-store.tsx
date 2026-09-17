@@ -169,8 +169,9 @@ type Store = {
   audit: AuditEvent[];
   accounts: PortalAccount[];
   notifications: PatientNotification[];
-  checkIn: (id: string, queueNumber: string) => boolean;
+  checkIn: (id: string) => string | null;
   markAbsent: (id: string) => void;
+  startTriage: (id: string) => boolean;
   completeTriage: (record: Omit<TriageRecord, "completedAt">) => boolean;
   importMigration: (rows: MigrationRow[]) => ImportSummary;
   registerPatient: (input: RegistrationInput) => Patient;
@@ -182,10 +183,9 @@ type Store = {
   addWalkIn: (
     patientId: string,
     serviceId: string,
-    queueNumber: string,
     reason: string,
     expectedCareArea?: "General Clinic" | "Animal Bite Center",
-  ) => boolean;
+  ) => string | null;
   callNext: (area?: "General Clinic" | "Animal Bite Center") => void;
   completeConsultation: (
     id: string,
@@ -240,6 +240,32 @@ type Store = {
 const key = "smartserve-prototype-v3";
 const StoreContext = createContext<Store | null>(null);
 const now = () => new Date().toISOString();
+const nextQueueNumber = (
+  appointments: Appointment[],
+  area: "General Clinic" | "Animal Bite Center",
+  date: string,
+) => {
+  const used = new Set(
+    appointments
+      .filter(
+        (appointment) =>
+          appointment.date === date &&
+          (appointment.queueArea || "General Clinic") === area &&
+          !["Completed", "Consultation Completed", "No Show", "Skipped", "Cancelled"].includes(
+            appointment.queueStatus,
+          ),
+      )
+      .map((appointment) => {
+        const digits = appointment.queueNumber.replace(/\D/g, "");
+        return digits ? digits.padStart(3, "0") : "";
+      }),
+  );
+  for (let number = 1; number <= 100; number += 1) {
+    const candidate = String(number).padStart(3, "0");
+    if (!used.has(candidate)) return candidate;
+  }
+  return null;
+};
 const normalizePatientIdentity = (value: string) =>
   value
     .trim()
@@ -353,7 +379,9 @@ const hydrate = (saved: Partial<ReturnType<typeof seed>>) => {
     ...saved,
     appointments,
     notifications: Array.isArray(saved.notifications) ? saved.notifications : [],
-    barangays: Array.isArray(saved.barangays) ? saved.barangays : [],
+    // This view is derived from registered patient addresses. Address dropdown
+    // choices live separately in the PSGC-backed registration directory.
+    barangays: [],
     staffUsers: Array.isArray(saved.staffUsers)
       ? saved.staffUsers.map((savedUser) => {
         const legacy = savedUser as StaffUser & { availability?: unknown; availabilityNote?: string };
@@ -1143,26 +1171,22 @@ export function PrototypeStoreProvider({
             a.id === id ? { ...a, queueStatus: "Skipped" } : a,
           ),
         })),
-      checkIn: (id, givenNumber) => {
-        const queueNumber = givenNumber.replace(/\D/g, "").padStart(3, "0");
+      checkIn: (id) => {
         const appointmentToCheckIn = data.appointments.find((appointment) => appointment.id === id);
         const appointmentService = data.services.find(
           (service) => service.id === appointmentToCheckIn?.serviceId,
         );
         const queueArea = careAreaForService(appointmentService);
+        const queueNumber = nextQueueNumber(
+          data.appointments,
+          queueArea,
+          appointmentToCheckIn?.date || new Date().toISOString().slice(0, 10),
+        );
         if (
-          !/^(0(0[1-9]|[1-9][0-9])|100)$/.test(queueNumber) ||
-          data.appointments.some(
-            (a) =>
-              a.id !== id &&
-              a.queueNumber === queueNumber &&
-              (a.queueArea || "General Clinic") === queueArea &&
-              !["Completed", "Consultation Completed", "No Show"].includes(
-                a.queueStatus,
-              ),
-          )
+          !appointmentToCheckIn ||
+          !queueNumber
         )
-          return false;
+          return null;
         const checkedInAt = now();
         change(
           "Front desk",
@@ -1201,7 +1225,7 @@ export function PrototypeStoreProvider({
             })(),
           }),
         );
-        return true;
+        return queueNumber;
       },
       registerPatient: (input) => {
         const patient: Patient = {
@@ -1302,25 +1326,18 @@ export function PrototypeStoreProvider({
               null
           : null;
       },
-      addWalkIn: (patientId, serviceId, givenNumber, reason, expectedCareArea) => {
-        const queueNumber = givenNumber.trim().padStart(3, "0");
+      addWalkIn: (patientId, serviceId, reason, expectedCareArea) => {
         const service = data.services.find((item) => item.id === serviceId);
         const careArea = careAreaForService(service);
+        const visitDate = new Date().toISOString().slice(0, 10);
+        const queueNumber = nextQueueNumber(data.appointments, careArea, visitDate);
         if (
           !data.patients.some((patient) => patient.id === patientId) ||
           !service ||
           (expectedCareArea && careArea !== expectedCareArea) ||
-          !/^(0(0[1-9]|[1-9][0-9])|100)$/.test(queueNumber) ||
-          data.appointments.some(
-            (a) =>
-              a.queueNumber === queueNumber &&
-              (a.queueArea || "General Clinic") === careArea &&
-              !["Completed", "Consultation Completed", "No Show"].includes(
-                a.queueStatus,
-              ),
-          )
+          !queueNumber
         )
-          return false;
+          return null;
         const checkedInAt = now();
         change(
           "Triage / intake",
@@ -1333,7 +1350,7 @@ export function PrototypeStoreProvider({
                 id: crypto.randomUUID(),
                 patientId,
                 serviceId,
-                date: new Date().toISOString().slice(0, 10),
+                date: visitDate,
                 timeSlot: "Walk-in",
                 queueNumber,
                 attendanceStatus: "Present",
@@ -1349,7 +1366,7 @@ export function PrototypeStoreProvider({
             ],
           }),
         );
-        return true;
+        return queueNumber;
       },
       markAbsent: (id) =>
         change("Front desk", "Marked absent", id, (d) => ({
@@ -1360,6 +1377,28 @@ export function PrototypeStoreProvider({
               : a,
           ),
         })),
+      startTriage: (id) => {
+        const appointment = data.appointments.find((item) => item.id === id);
+        if (!appointment || appointment.queueStatus !== "Waiting for Triage") return false;
+        const appointmentService = data.services.find(
+          (service) => service.id === appointment.serviceId,
+        );
+        const queueArea = careAreaForService(appointmentService);
+        const alreadyAssessing = data.appointments.some(
+          (item) =>
+            item.id !== id &&
+            (item.queueArea || "General Clinic") === queueArea &&
+            item.queueStatus === "Triage",
+        );
+        if (alreadyAssessing) return false;
+        change("Nurse / triage", "Started patient assessment", id, (d) => ({
+          ...d,
+          appointments: d.appointments.map((item) =>
+            item.id === id ? { ...item, queueStatus: "Triage" } : item,
+          ),
+        }));
+        return true;
+      },
       completeTriage: (record) => {
         const appointment = data.appointments.find((item) => item.id === record.appointmentId);
         const appointmentService = data.services.find(
@@ -1436,7 +1475,7 @@ export function PrototypeStoreProvider({
                 id: crypto.randomUUID(),
                 patientId: next.patientId,
                 title: "You are now being served",
-                message: `Queue number ${next.queueNumber || "assigned"} is now being served. Please proceed to ${next.room || "the assigned room"} for your consultation.`,
+                message: `Queue number ${next.queueNumber || "assigned"} is now being served. Please proceed to the doctor for your consultation.`,
                 createdAt: now(),
                 read: false,
                 type: "alert",

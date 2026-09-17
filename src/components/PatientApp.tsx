@@ -30,6 +30,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
+  barangaysForMunicipality,
+  fetchPsgcBarangays,
+  isabelaMunicipalities,
+} from "@/data/isabela-locations";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -373,7 +378,7 @@ function LoginScreen({
       {
         fullName: form.fullName,
         dob: form.dob,
-        gender: form.gender,
+        gender: form.gender as Patient["gender"],
         contact: form.mobile,
         barangay: form.barangay,
         municipality: form.municipality,
@@ -664,7 +669,13 @@ function PortalInput({
         maxLength={maxLength}
         placeholder={placeholder}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) =>
+          onChange(
+            inputMode === "numeric" || inputMode === "tel"
+              ? event.target.value.replace(/\D/g, "")
+              : event.target.value,
+          )
+        }
         className="rounded-xl"
       />
     </div>
@@ -687,7 +698,7 @@ function OnlineRegistrationWizard({
     middleName: "",
     suffix: "",
     dob: "",
-    gender: "Female" as Patient["gender"],
+    gender: "" as "" | Patient["gender"],
     civilStatus: "",
     nationality: "Filipino",
     preferredLanguage: "Filipino",
@@ -716,6 +727,21 @@ function OnlineRegistrationWizard({
     privacyAcknowledged: false,
   });
   const [error, setError] = useState("");
+  const [municipalityBarangays, setMunicipalityBarangays] = useState<string[]>(() => barangaysForMunicipality("Jones"));
+  const [barangayDirectoryLoading, setBarangayDirectoryLoading] = useState(false);
+  useEffect(() => {
+    let active = true;
+    if (!form.municipality) {
+      setMunicipalityBarangays([]);
+      return () => { active = false; };
+    }
+    setBarangayDirectoryLoading(true);
+    void fetchPsgcBarangays(form.municipality)
+      .then((items) => { if (active) setMunicipalityBarangays(items); })
+      .catch(() => { if (active) setMunicipalityBarangays([]); })
+      .finally(() => { if (active) setBarangayDirectoryLoading(false); });
+    return () => { active = false; };
+  }, [form.municipality]);
   const age = calculateAge(form.dob);
   const needsGuardian = age !== null && age < 18;
   const fullName = [
@@ -740,8 +766,8 @@ function OnlineRegistrationWizard({
   const set = (key: string, value: any) =>
     setForm((current) => ({ ...current, [key]: value }));
   const stepProblem = () => {
-    if (step === 1 && (!form.familyName || !form.givenName || !form.dob))
-      return "Enter your last name, first name, and date of birth.";
+    if (step === 1 && (!form.familyName || !form.givenName || !form.dob || !form.gender))
+      return "Enter your last name, first name, date of birth, and sex.";
     if (
       step === 2 &&
       (!form.mobile ||
@@ -947,18 +973,30 @@ function OnlineRegistrationWizard({
                 onChange={(event) => set("gender", event.target.value)}
                 className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"
               >
+                <option value="" disabled>Select sex</option>
                 <option>Female</option>
                 <option>Male</option>
                 <option>Other</option>
-                <option>Unknown</option>
               </select>
             </div>
-            <PortalInput
-              id="online-civil-status"
-              label="Civil status"
-              value={form.civilStatus}
-              onChange={(value) => set("civilStatus", value)}
-            />
+            <div>
+              <Label htmlFor="online-civil-status" className="text-xs">
+                Civil status
+              </Label>
+              <select
+                id="online-civil-status"
+                value={form.civilStatus}
+                onChange={(event) => set("civilStatus", event.target.value)}
+                className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"
+              >
+                <option value="">Select civil status</option>
+                <option>Single</option>
+                <option>Married</option>
+                <option>Widowed</option>
+                <option>Separated</option>
+                <option>Divorced</option>
+              </select>
+            </div>
             <PortalInput
               id="online-nationality"
               label="Nationality"
@@ -1012,27 +1050,37 @@ function OnlineRegistrationWizard({
               value={form.addressLine}
               onChange={(value) => set("addressLine", value)}
             />
-            <PortalInput
-              id="online-barangay"
-              label="Barangay"
-              required
-              value={form.barangay}
-              onChange={(value) => set("barangay", value)}
-            />
-            <PortalInput
-              id="online-municipality"
-              label="Municipality / city"
-              required
-              value={form.municipality}
-              onChange={(value) => set("municipality", value)}
-            />
-            <PortalInput
-              id="online-province"
-              label="Province"
-              required
-              value={form.province}
-              onChange={(value) => set("province", value)}
-            />
+            <div>
+              <Label htmlFor="online-municipality" className="text-xs">Municipality / city *</Label>
+              <select
+                id="online-municipality"
+                value={form.municipality}
+                onChange={(event) => setForm((current) => ({ ...current, municipality: event.target.value, barangay: "" }))}
+                className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"
+              >
+                <option value="">Select municipality / city</option>
+                {isabelaMunicipalities.map((municipality) => <option key={municipality}>{municipality}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="online-barangay" className="text-xs">Barangay *</Label>
+              <select
+                id="online-barangay"
+                value={form.barangay}
+                onChange={(event) => set("barangay", event.target.value)}
+                disabled={!form.municipality || barangayDirectoryLoading || !municipalityBarangays.length}
+                className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">{!form.municipality ? "Select municipality first" : barangayDirectoryLoading ? "Loading barangays…" : municipalityBarangays.length ? "Select barangay" : "Barangay directory unavailable"}</option>
+                {municipalityBarangays.map((barangay) => <option key={barangay}>{barangay}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="online-province" className="text-xs">Province *</Label>
+              <select id="online-province" value="Isabela" disabled className="mt-1 h-10 w-full rounded-xl border border-input bg-muted px-3 text-sm" aria-label="Province preselected as Isabela">
+                <option>Isabela</option>
+              </select>
+            </div>
             <PortalInput
               id="online-postal"
               label="Postal code"

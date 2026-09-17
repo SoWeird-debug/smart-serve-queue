@@ -59,8 +59,8 @@ const Index = () => {
               />
               <div className="min-w-0">
                 <h1 className="font-display text-sm font-bold leading-tight md:text-base">
-                  An integrated web application for service booking with Disease
-                  trend monitoring in Super Health Center of Jones, Isabela
+                  AN INTEGRATED WEB APPLICATION FOR SERVICE BOOKING WITH DISEASE
+                  TREND MONITORING IN SUPER HEALTH CENTER OF JONES, ISABELA
                 </h1>
               </div>
             </div>

@@ -1,5 +1,16 @@
 import type { Appointment, TriagePriority } from "@/data/mockData";
 
+export type QueueOrderableAppointment = Pick<
+  Appointment,
+  | "id"
+  | "queueNumber"
+  | "queueStatus"
+  | "triagePriority"
+  | "queueEnteredAt"
+  | "createdAt"
+  | "visitType"
+>;
+
 const priorityRank: Record<TriagePriority, number> = {
   Emergency: 0,
   Urgent: 1,
@@ -7,7 +18,7 @@ const priorityRank: Record<TriagePriority, number> = {
   Normal: 3,
 };
 
-export function appointmentPriority(appointment: Appointment): TriagePriority {
+export function appointmentPriority(appointment: QueueOrderableAppointment): TriagePriority {
   return appointment.triagePriority ?? "Normal";
 }
 
@@ -20,13 +31,10 @@ function queueNumberRank(queueNumber: string) {
  * Returns doctor-ready patients in clinical priority order. Patients with the
  * same triage level retain their physical queue-number order.
  */
-export function orderDoctorQueue(appointments: Appointment[]) {
-  return appointments
+export function orderDoctorQueue(appointments: QueueOrderableAppointment[]) {
+  const ready = appointments
     .filter(appointment => appointment.queueStatus === "Waiting for Doctor")
     .toSorted((left, right) => {
-      const priorityDifference = priorityRank[appointmentPriority(left)] - priorityRank[appointmentPriority(right)];
-      if (priorityDifference !== 0) return priorityDifference;
-
       const queueDifference = queueNumberRank(left.queueNumber) - queueNumberRank(right.queueNumber);
       if (queueDifference !== 0) return queueDifference;
 
@@ -35,4 +43,20 @@ export function orderDoctorQueue(appointments: Appointment[]) {
 
       return left.id.localeCompare(right.id);
     });
+  const ordered: QueueOrderableAppointment[] = [];
+  for (const priority of Object.keys(priorityRank) as TriagePriority[]) {
+    let remaining = ready.filter((appointment) => appointmentPriority(appointment) === priority);
+    if (!remaining.length) continue;
+    let nextVisitType = remaining[0].visitType || "Scheduled";
+    while (remaining.length) {
+      const preferred = remaining.find((appointment) =>
+        (appointment.visitType || "Scheduled") === nextVisitType,
+      );
+      const selected = preferred || remaining[0];
+      ordered.push(selected);
+      remaining = remaining.filter((appointment) => appointment.id !== selected.id);
+      nextVisitType = selected.visitType === "Walk-in" ? "Scheduled" : "Walk-in";
+    }
+  }
+  return ordered;
 }

@@ -25,6 +25,11 @@ import { usePrototypeStore, type StaffUser } from "@/lib/prototype-store";
 import { calculateAge } from "@/lib/patient-age";
 import { reverseGeocodePhilippineAddress } from "@/lib/location-address";
 import { appointmentPriority, orderDoctorQueue } from "@/lib/queue-priority";
+import {
+  barangaysForMunicipality,
+  fetchPsgcBarangays,
+  isabelaMunicipalities,
+} from "@/data/isabela-locations";
 
 type FrontDeskTab = "checkin" | "intake" | "queue";
 export type CareArea = "General Clinic" | "Animal Bite Center";
@@ -37,16 +42,25 @@ export type QueueDisplayAppointment = Pick<
   | "triagePriority"
   | "queueArea"
   | "queueEnteredAt"
+  | "visitType"
   | "createdAt"
 >;
 export type QueueDisplayState = {
   appointments: QueueDisplayAppointment[];
+  doctors: QueueDisplayDoctor[];
   updatedAt: string;
+};
+export type QueueDisplayDoctor = {
+  id: string;
+  fullName: string;
+  doctorStatus: NonNullable<StaffUser["doctorStatus"]>;
+  queueArea: CareArea;
 };
 
 export const createPublicQueueSnapshot = (
   appointments: Appointment[],
   area?: CareArea,
+  staffUsers: StaffUser[] = [],
 ): QueueDisplayState => ({
   appointments: appointments
     .filter(
@@ -63,6 +77,7 @@ export const createPublicQueueSnapshot = (
         triagePriority,
         queueArea,
         queueEnteredAt,
+        visitType,
         createdAt,
       }) => ({
         id,
@@ -72,9 +87,25 @@ export const createPublicQueueSnapshot = (
         triagePriority,
         queueArea,
         queueEnteredAt,
+        visitType,
         createdAt,
       }),
     ),
+  doctors: staffUsers
+    .filter((user) => {
+      const doctorArea: CareArea = user.assignedAreas?.includes("Animal Bite Center")
+        ? "Animal Bite Center"
+        : "General Clinic";
+      return user.role === "Doctor" && user.active && (!area || doctorArea === area);
+    })
+    .map((user) => ({
+      id: user.id,
+      fullName: user.fullName,
+      doctorStatus: user.doctorStatus || "Available",
+      queueArea: user.assignedAreas?.includes("Animal Bite Center")
+        ? "Animal Bite Center"
+        : "General Clinic",
+    })),
   updatedAt: new Date().toISOString(),
 });
 
@@ -83,8 +114,9 @@ export const createPublicQueueSnapshot = (
 export const publishPublicQueueArea = (
   appointments: Appointment[],
   area: CareArea,
+  staffUsers: StaffUser[] = [],
 ) => {
-  const snapshot = createPublicQueueSnapshot(appointments, area);
+  const snapshot = createPublicQueueSnapshot(appointments, area, staffUsers);
   return fetch("/api/queue-display", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -140,10 +172,10 @@ export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
   const isAnimalBiteWorkspace = careArea === "Animal Bite Center";
   const isNurseTriage = staffUser?.role === "Nurse / Triage";
   useEffect(() => {
-    void publishPublicQueueArea(store.appointments, careArea).catch(
+    void publishPublicQueueArea(store.appointments, careArea, store.staffUsers).catch(
       () => undefined,
     );
-  }, [store.appointments, careArea]);
+  }, [store.appointments, store.staffUsers, careArea]);
   const frontDeskTabs = [
     { id: "checkin" as FrontDeskTab, label: isAnimalBiteWorkspace ? "Bite Patient Check-in" : "Scheduled Check-in", icon: UserCheck },
     {
@@ -227,33 +259,17 @@ export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
   );
 }
 
-const displayPriorityRank = {
-  Emergency: 0,
-  Urgent: 1,
-  Priority: 2,
-  Normal: 3,
-} as const;
-const displayQueueNumberRank = (queueNumber: string) => {
-  const value = Number.parseInt(queueNumber.replace(/\D/g, ""), 10);
-  return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
-};
 const orderPublicDoctorQueue = (appointments: QueueDisplayAppointment[]) =>
-  appointments
-    .filter((appointment) => appointment.queueStatus === "Waiting for Doctor")
-    .toSorted((left, right) => {
-      const priorityDifference =
-        displayPriorityRank[left.triagePriority || "Normal"] -
-        displayPriorityRank[right.triagePriority || "Normal"];
-      if (priorityDifference) return priorityDifference;
-      return displayQueueNumberRank(left.queueNumber) - displayQueueNumberRank(right.queueNumber);
-    });
+  orderDoctorQueue(appointments);
 
 function Board({
   appts,
+  doctors,
   now,
   area = "General Clinic",
 }: {
   appts: QueueDisplayAppointment[];
+  doctors: QueueDisplayDoctor[];
   now: Date;
   area?: "General Clinic" | "Animal Bite Center";
 }) {
@@ -271,6 +287,26 @@ function Board({
       }),
     );
   const upNext = [...orderPublicDoctorQueue(areaAppointments), ...triageWaiting];
+  const triageServing = areaAppointments.filter(
+    (appointment) => appointment.queueStatus === "Triage",
+  );
+  // A patient remains visible in the doctor lane after triage. If the doctor
+  // has not pressed Call next yet, show the first doctor-ready patient instead
+  // of leaving the public "Now serving · doctor" panel blank.
+  const doctorServing = called.length
+    ? called
+    : orderPublicDoctorQueue(areaAppointments).slice(0, 1);
+  const visibleUpNext = upNext.filter(
+    (appointment) => !doctorServing.some((current) => current.id === appointment.id),
+  );
+  const areaDoctors = doctors.filter((doctor) => doctor.queueArea === area);
+  const doctorTone: Record<QueueDisplayDoctor["doctorStatus"], string> = {
+    Available: "bg-emerald-400/20 text-emerald-200",
+    "With patient": "bg-sky-400/20 text-sky-100",
+    "On break": "bg-amber-400/20 text-amber-100",
+    "Off duty": "bg-slate-400/20 text-slate-200",
+    "On leave": "bg-rose-400/20 text-rose-100",
+  };
 
   return (
     <div className="tv-frame max-w-[1200px]">
@@ -291,31 +327,52 @@ function Board({
             })}
           </p>
         </div>
-        <div className="grid md:grid-cols-2 gap-4 mb-6">
-          {called.length ? (
-            called.map((a) => (
+        <div className="grid gap-4 md:grid-cols-2 mb-6">
+          <div className="rounded-2xl bg-card/5 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[.12em] text-primary-foreground/70">Now serving · nurse / triage</p>
+            {triageServing.length ? triageServing.map((a) => (
               <div
                 key={a.id}
-                className="bg-gradient-primary rounded-2xl p-6 shadow-glow"
+                className="mt-3 rounded-2xl bg-teal-500/90 p-6 shadow-glow"
               >
-                <p className="text-xs uppercase opacity-80">Now serving</p>
                 <p className="font-display font-extrabold text-7xl my-1">
                   {a.queueNumber}
                 </p>
                 <p className="text-sm opacity-90">
-                  Please proceed to {a.room || "the assigned room"}
+                  Please proceed to nurse / triage
                 </p>
               </div>
-            ))
-          ) : (
-            <div className="md:col-span-2 bg-card/5 rounded-2xl p-10 text-center text-primary-foreground/60">
-              No queue number is currently being served.
-            </div>
-          )}
+            )) : <p className="mt-6 text-center text-sm text-primary-foreground/60">No patient is currently with nurse / triage.</p>}
+          </div>
+          <div className="rounded-2xl bg-card/5 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[.12em] text-primary-foreground/70">Now serving · doctor</p>
+            {doctorServing.length ? doctorServing.map((a) => (
+              <div key={a.id} className="mt-3 rounded-2xl bg-gradient-primary p-6 shadow-glow">
+                <p className="font-display font-extrabold text-7xl my-1">{a.queueNumber}</p>
+                <p className="text-sm opacity-90">Please proceed to the doctor</p>
+              </div>
+            )) : <p className="mt-6 text-center text-sm text-primary-foreground/60">No patient is currently with the doctor.</p>}
+          </div>
+        </div>
+        <div className="mb-6 rounded-2xl bg-card/5 p-5">
+          <h3 className="font-display text-lg font-bold">Doctor availability</h3>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {areaDoctors.map((doctor) => (
+              <div key={doctor.id} className="flex items-center justify-between gap-3 rounded-xl bg-card/5 px-4 py-3">
+                <p className="truncate font-semibold">{doctor.fullName}</p>
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${doctorTone[doctor.doctorStatus]}`}>
+                  {doctor.doctorStatus}
+                </span>
+              </div>
+            ))}
+            {!areaDoctors.length ? (
+              <p className="text-sm text-primary-foreground/60">No doctor is assigned to this queue.</p>
+            ) : null}
+          </div>
         </div>
         <div className="bg-card/5 rounded-2xl p-5">
           <h3 className="font-display font-bold text-lg mb-3">Up next</h3>
-          {upNext.map((a, i) => (
+          {visibleUpNext.map((a, i) => (
             <div
               key={a.id}
               className="flex gap-3 bg-card/5 rounded-xl p-3 mb-2"
@@ -333,7 +390,7 @@ function Board({
               </div>
             </div>
           ))}
-          {!upNext.length && (
+          {!visibleUpNext.length && (
             <p className="text-primary-foreground/50">Queue is clear.</p>
           )}
         </div>
@@ -350,6 +407,7 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
   const [now, setNow] = useState(new Date());
   const [queue, setQueue] = useState<QueueDisplayState>({
     appointments: [],
+    doctors: [],
     updatedAt: "",
   });
   const [connection, setConnection] = useState("Connecting to the local SmartServe queue…");
@@ -374,6 +432,7 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
           appointments: Array.isArray(state.appointments)
             ? state.appointments
             : [],
+          doctors: Array.isArray(state.doctors) ? state.doctors : [],
           updatedAt: state.updatedAt || "",
         });
         setConnection(
@@ -396,24 +455,34 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
 
   return (
     <main className="min-h-screen bg-slate-950 p-3 md:p-6">
-      <Board appts={queue.appointments} now={now} area={area} />
+      <Board appts={queue.appointments} doctors={queue.doctors} now={now} area={area} />
       <p className="mt-3 text-center text-xs text-slate-400">{connection}</p>
     </main>
   );
 }
 
 function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) {
-  const [numbers, setNumbers] = useState<Record<string, string>>({});
+  const [query, setQuery] = useState("");
+  const [confirmation, setConfirmation] = useState<{ name: string; queueNumber: string } | null>(null);
   const [error, setError] = useState("");
+  useEffect(() => {
+    if (!confirmation) return;
+    const timeout = window.setTimeout(() => setConfirmation(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [confirmation]);
   const scheduled = appts.filter((appointment: Appointment) => {
     const service = services.find(
       (item: Service) => item.id === appointment.serviceId,
     );
+    const patient = patients.find((item: Patient) => item.id === appointment.patientId);
     const appointmentArea = service?.queueArea || appointment.queueArea || "General Clinic";
     return (
       appointment.visitType === "Scheduled" &&
       appointment.queueStatus === "Scheduled" &&
-      appointmentArea === area
+      appointmentArea === area &&
+      `${patient?.fullName || ""} ${patient?.patientNumber || ""} ${patient?.contact || ""}`
+        .toLowerCase()
+        .includes(query.trim().toLowerCase())
     );
   });
   return (
@@ -423,9 +492,24 @@ function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) 
           {area === "Animal Bite Center" ? "Animal Bite patient check-in" : "Scheduled patient check-in"}
         </h3>
         <p className="text-sm text-muted-foreground">
-          Verify the booking and identity privately, then input the physical
-          number issued to the patient.
+          Verify the booking and identity privately, then confirm presence to
+          assign the next available queue number automatically.
         </p>
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search online booking by patient name, ID, or mobile"
+            aria-label="Search scheduled patients"
+            className="pl-9"
+          />
+        </div>
+        {confirmation ? (
+          <div role="status" className="mt-3 animate-fade-in rounded-xl border border-secondary/30 bg-secondary-soft px-4 py-3 text-sm font-semibold text-secondary">
+            {confirmation.name} confirmed present · queue number {confirmation.queueNumber}
+          </div>
+        ) : null}
         {error && <p className="text-sm text-destructive mt-2">{error}</p>}
       </div>
       {scheduled.map((a: Appointment) => (
@@ -443,26 +527,21 @@ function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) 
               {a.attendanceStatus}
             </p>
           </div>
-          {a.attendanceStatus !== "Present" && (
-            <Input
-              value={numbers[a.id] || ""}
-              onChange={(e) =>
-                setNumbers((x) => ({ ...x, [a.id]: e.target.value }))
-              }
-              placeholder="001–100"
-              className="md:w-28"
-            />
-          )}
           <Button
             size="sm"
-            disabled={
-              a.attendanceStatus === "Present" || !(numbers[a.id] || "").trim()
-            }
-            onClick={() =>
-              checkIn(a.id, numbers[a.id])
-                ? setError("")
-                : setError("Use a unique active queue number from 001 to 100.")
-            }
+            disabled={a.attendanceStatus === "Present"}
+            onClick={() => {
+              const assignedQueueNumber = checkIn(a.id);
+              if (!assignedQueueNumber) {
+                setError("All 100 queue numbers for this care area are currently in use.");
+                return;
+              }
+              setError("");
+              setConfirmation({
+                name: label(patients, a.patientId),
+                queueNumber: assignedQueueNumber,
+              });
+            }}
           >
             <UserCheck className="w-4 h-4 mr-1" />
             Confirm
@@ -505,7 +584,7 @@ function FrontDeskIntake({ services, area }: { services: Service[]; area: CareAr
           active={mode === "walkin"}
           icon={Users}
           title={isAnimalBiteWorkspace ? "Add Animal Bite walk-in" : "Add registered walk-in"}
-          description={isAnimalBiteWorkspace ? "Issue a number only for Animal Bite Center care." : "Find an existing patient and issue a queue number."}
+          description={isAnimalBiteWorkspace ? "Find the patient and assign an Animal Bite queue number automatically." : "Find an existing patient and assign a queue number automatically."}
           onClick={() => setMode("walkin")}
         />
       </div>
@@ -513,8 +592,8 @@ function FrontDeskIntake({ services, area }: { services: Service[]; area: CareAr
         <RegistrationForm
           onRegistered={(patientId) => {
             setNewlyRegisteredPatientId(patientId);
-            setMode("walkin");
           }}
+          onContinueToWalkIn={() => setMode("walkin")}
         />
       )}{" "}
       {mode === "walkin" && (
@@ -540,7 +619,6 @@ function Action({ active, icon: Icon, title, description, onClick }: any) {
     >
       <Icon className="w-5 h-5 text-primary mb-3" />
       <p className="font-display font-bold">{title}</p>
-      <p className="text-xs text-muted-foreground mt-1">{description}</p>
     </button>
   );
 }
@@ -583,14 +661,26 @@ function RegistrationTextInput({
         maxLength={maxLength}
         autoComplete={autoComplete}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) =>
+          onChange(
+            inputMode === "numeric" || inputMode === "tel"
+              ? event.target.value.replace(/\D/g, "")
+              : event.target.value,
+          )
+        }
         className="mt-1"
       />
     </div>
   );
 }
 
-function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) => void }) {
+function RegistrationForm({
+  onRegistered,
+  onContinueToWalkIn,
+}: {
+  onRegistered: (patientId: string) => void;
+  onContinueToWalkIn: () => void;
+}) {
   const { patients, registerPatient } = usePrototypeStore();
   const [form, setForm] = useState({
     givenName: "",
@@ -598,14 +688,14 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
     middleName: "",
     suffix: "",
     dob: "",
-    gender: "Female" as Patient["gender"],
+    gender: "" as "" | Patient["gender"],
     contact: "",
     alternateContact: "",
     email: "",
     addressLine: "",
     barangay: "",
     municipality: "",
-    province: "",
+    province: "Isabela",
     postalCode: "",
     civilStatus: "",
     nationality: "Filipino",
@@ -638,6 +728,7 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
   const [verifiedAddress, setVerifiedAddress] = useState("");
   const [locationDetailsStatus, setLocationDetailsStatus] = useState("");
   const [registrationError, setRegistrationError] = useState("");
+  const [registrationSuccess, setRegistrationSuccess] = useState("");
   const fullName = [
     form.givenName,
     form.middleName,
@@ -704,7 +795,7 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
         ...current,
         barangay: details.barangay || current.barangay,
         municipality: details.municipality || current.municipality,
-        province: details.province || current.province,
+        province: "Isabela",
         postalCode: details.postalCode || current.postalCode,
       }));
       const updated = [
@@ -788,6 +879,7 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
       !form.givenName ||
       !form.familyName ||
       !form.dob ||
+      !form.gender ||
       !form.contact ||
       !form.addressLine ||
       !form.barangay ||
@@ -829,6 +921,7 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
     }
     const patient = registerPatient({
       ...form,
+      gender: form.gender as Patient["gender"],
       fullName,
       address,
       latitude: pin.latitude,
@@ -841,6 +934,9 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
         : undefined,
     });
     onRegistered(patient.id);
+    setRegistrationSuccess(
+      `${patient.fullName} was registered successfully. You can now continue to walk-in.`,
+    );
   };
   const identityFields = [
     ["familyName", "Last / family name", true, "family-name"],
@@ -848,7 +944,6 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
     ["middleName", "Middle name", false, "additional-name"],
     ["suffix", "Name suffix (Jr., Sr., III)", false, "honorific-suffix"],
     ["dob", "Date of birth", true, "bday"],
-    ["civilStatus", "Civil status", false, "off"],
     ["nationality", "Nationality", true, "country-name"],
     ["preferredLanguage", "Preferred language", false, "language"],
   ] as const;
@@ -859,28 +954,29 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
   ] as const;
   const addressFields = [
     ["addressLine", "House no., street, purok / sitio", true, "street-address"],
-    ["barangay", "Barangay", true, "address-level3"],
-    ["municipality", "Municipality / city", true, "address-level2"],
-    ["province", "Province", true, "address-level1"],
     ["postalCode", "Postal code", true, "postal-code"],
   ] as const;
+  const [municipalityBarangays, setMunicipalityBarangays] = useState<string[]>(() => barangaysForMunicipality(form.municipality));
+  const [barangayDirectoryLoading, setBarangayDirectoryLoading] = useState(false);
+  useEffect(() => {
+    let active = true;
+    if (!form.municipality) {
+      setMunicipalityBarangays([]);
+      return () => { active = false; };
+    }
+    setBarangayDirectoryLoading(true);
+    void fetchPsgcBarangays(form.municipality)
+      .then((items) => { if (active) setMunicipalityBarangays(items); })
+      .catch(() => { if (active) setMunicipalityBarangays([]); })
+      .finally(() => { if (active) setBarangayDirectoryLoading(false); });
+    return () => { active = false; };
+  }, [form.municipality]);
   return (
     <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
       <h3 className="font-display font-bold text-lg">
         Manual patient registration
       </h3>
-      <p className="text-sm text-muted-foreground mb-5">
-        This uses the same patient-profile standard as online registration.
-        Complete it with the patient, then search and confirm the residence
-        location. Enter the complete address first, then search for and verify
-        the exact residence pin before saving.
-      </p>
-      <div className="mb-5 rounded-xl border border-primary/20 bg-primary-soft/60 px-4 py-3 text-sm text-primary">
-        A permanent SmartServe patient ID is created on save. Future walk-ins,
-        appointments, triage, consultations, prescriptions, and checkups are
-        attached to that ID instead of creating another patient profile.
-      </div>
-      <div className="space-y-5">
+      <div className="mt-5 space-y-5">
         <section className="rounded-2xl border border-border bg-muted/20 p-4">
           <div className="mb-4">
             <h4 className="font-display font-bold">Patient identity</h4>
@@ -901,6 +997,22 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
                 onChange={(value) => set(key, value)}
               />
             ))}
+            <div>
+              <Label htmlFor="patient-civil-status">Civil status</Label>
+              <select
+                id="patient-civil-status"
+                value={form.civilStatus}
+                onChange={(event) => set("civilStatus", event.target.value)}
+                className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">Select civil status</option>
+                <option>Single</option>
+                <option>Married</option>
+                <option>Widowed</option>
+                <option>Separated</option>
+                <option>Divorced</option>
+              </select>
+            </div>
             <div className="md:col-span-2 rounded-xl border border-primary/15 bg-primary-soft/50 px-3 py-2 text-sm">
               <span className="text-muted-foreground">
                 Official record name:{" "}
@@ -925,10 +1037,10 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
                 onChange={(event) => set("gender", event.target.value)}
                 className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
+                <option value="" disabled>Select sex</option>
                 <option>Female</option>
                 <option>Male</option>
                 <option>Other</option>
-                <option>Unknown</option>
               </select>
             </div>
           </div>
@@ -994,6 +1106,41 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
                 }
               />
             ))}
+            <div>
+              <Label htmlFor="patient-municipality">Municipality / city <span className="text-destructive">*</span></Label>
+              <select
+                id="patient-municipality"
+                value={form.municipality}
+                onChange={(event) => {
+                  set("municipality", event.target.value);
+                  set("barangay", "");
+                }}
+                className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">Select municipality / city</option>
+                {isabelaMunicipalities.map((municipality) => <option key={municipality}>{municipality}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="patient-barangay">Barangay <span className="text-destructive">*</span></Label>
+              <select
+                id="patient-barangay"
+                value={form.barangay}
+                onChange={(event) => set("barangay", event.target.value)}
+                disabled={!form.municipality || barangayDirectoryLoading || !municipalityBarangays.length}
+                className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">{!form.municipality ? "Select municipality first" : barangayDirectoryLoading ? "Loading barangays…" : municipalityBarangays.length ? "Select barangay" : "Barangay directory unavailable"}</option>
+                {municipalityBarangays.map((barangay) => <option key={barangay}>{barangay}</option>)}
+              </select>
+              {form.municipality && !barangayDirectoryLoading && !municipalityBarangays.length ? <p className="mt-1 text-xs text-muted-foreground">The PSGC barangay directory could not be reached. Try again when online.</p> : null}
+            </div>
+            <div>
+              <Label htmlFor="patient-province">Province <span className="text-destructive">*</span></Label>
+              <select id="patient-province" value="Isabela" disabled className="mt-1 flex h-10 w-full rounded-md border border-input bg-muted px-3 text-sm" aria-label="Province preselected as Isabela">
+                <option>Isabela</option>
+              </select>
+            </div>
           </div>
         </section>
 
@@ -1229,6 +1376,14 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
           {registrationError}
         </p>
       ) : null}
+      {registrationSuccess ? (
+        <p
+          className="mt-4 rounded-xl border border-secondary/30 bg-secondary-soft px-3 py-2 text-sm font-medium text-secondary-foreground"
+          role="status"
+        >
+          {registrationSuccess}
+        </p>
+      ) : null}
       <div className="flex gap-2 mt-5 text-sm">
         <input
           type="checkbox"
@@ -1245,35 +1400,45 @@ function RegistrationForm({ onRegistered }: { onRegistered: (patientId: string) 
         />
         <span>Privacy notice was acknowledged.</span>
       </div>
-      <Button
-        disabled={
-          !form.givenName ||
-          !form.familyName ||
-          !form.dob ||
-          !form.contact ||
-          !form.addressLine ||
-          !form.barangay ||
-          !form.municipality ||
-          !form.province ||
-          !form.postalCode ||
-          (requiresGuardian &&
-            (!form.guardianName ||
-              !form.guardianRelationship ||
-              !form.guardianContact)) ||
-          (form.philHealthClientType !== "Not enrolled" &&
-            !form.philHealthPin) ||
-          (form.philHealthClientType === "Dependent" &&
-            (!form.philHealthMemberName || !form.philHealthMemberPin)) ||
-          !hasUsableLocation ||
-          !form.consentToTreatment ||
-          !form.privacyAcknowledged
-        }
-        onClick={submit}
-        className="mt-5"
-      >
-        <UserPlus className="w-4 h-4 mr-2" />
-        Save patient & continue to walk-in
-      </Button>
+      <div className="mt-5 flex flex-wrap gap-3">
+        <Button
+          disabled={
+            Boolean(registrationSuccess) ||
+            !form.givenName ||
+            !form.familyName ||
+            !form.dob ||
+            !form.gender ||
+            !form.contact ||
+            !form.addressLine ||
+            !form.barangay ||
+            !form.municipality ||
+            !form.province ||
+            !form.postalCode ||
+            (requiresGuardian &&
+              (!form.guardianName ||
+                !form.guardianRelationship ||
+                !form.guardianContact)) ||
+            (form.philHealthClientType !== "Not enrolled" &&
+              !form.philHealthPin) ||
+            (form.philHealthClientType === "Dependent" &&
+              (!form.philHealthMemberName || !form.philHealthMemberPin)) ||
+            !hasUsableLocation ||
+            !form.consentToTreatment ||
+            !form.privacyAcknowledged
+          }
+          onClick={submit}
+          className="mt-0"
+        >
+          <UserPlus className="w-4 h-4 mr-2" />
+          Register patient
+        </Button>
+        {registrationSuccess ? (
+          <Button type="button" variant="outline" onClick={onContinueToWalkIn}>
+            <Users className="mr-2 h-4 w-4" />
+            Continue to walk-in
+          </Button>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -1291,7 +1456,6 @@ function WalkInForm({
   const [query, setQuery] = useState("");
   const [patientId, setPatientId] = useState("");
   const [serviceId, setServiceId] = useState(() => services[0]?.id || "");
-  const [number, setNumber] = useState("");
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
   useEffect(() => {
@@ -1365,7 +1529,7 @@ function WalkInForm({
           )}
         </div>
       )}
-      <div className="grid md:grid-cols-2 gap-4 mt-4">
+      <div className="mt-4">
         <div>
           <Label>Requested service</Label>
           <select
@@ -1380,17 +1544,6 @@ function WalkInForm({
             ))}
           </select>
         </div>
-        <div>
-          <Label>Physical queue number</Label>
-          <Input
-            value={number}
-            onChange={(e) =>
-              setNumber(e.target.value.replace(/\D/g, "").slice(0, 3))
-            }
-            placeholder="001–100"
-            className="mt-1"
-          />
-        </div>
       </div>
       <div className="mt-4">
         <Label>Reason for visit</Label>
@@ -1402,13 +1555,16 @@ function WalkInForm({
         />
       </div>
       <Button
-        disabled={!patientId || !serviceId || !number || !reason}
+        disabled={!patientId || !serviceId || !reason}
         onClick={() =>
-          setMessage(
-            addWalkIn(patientId, serviceId, number, reason, area)
-              ? `${area === "Animal Bite Center" ? "Animal Bite" : "Walk-in"} visit saved. Patient is now waiting for triage.`
-              : "Use an available queue number from 001–100 for this clinic.",
-          )
+          (() => {
+            const assignedQueueNumber = addWalkIn(patientId, serviceId, reason, area);
+            setMessage(
+              assignedQueueNumber
+                ? `${area === "Animal Bite Center" ? "Animal Bite" : "Walk-in"} visit saved with queue number ${assignedQueueNumber}. Patient is now waiting for triage.`
+                : "All 100 queue numbers for this care area are currently in use.",
+            );
+          })()
         }
         className="mt-5"
       >
@@ -1419,7 +1575,7 @@ function WalkInForm({
         <p
           className={cn(
             "mt-3 text-sm",
-            message.startsWith("Walk") ? "text-secondary" : "text-destructive",
+            message.includes("saved") ? "text-secondary" : "text-destructive",
           )}
         >
           {message}
@@ -1430,10 +1586,14 @@ function WalkInForm({
 }
 
 function TriageForm({ area }: { area: CareArea }) {
-  const { appointments, patients, completeTriage } = usePrototypeStore();
-  const eligible = appointments.filter(
+  const { appointments, patients, startTriage, completeTriage } = usePrototypeStore();
+  const waiting = appointments.filter(
     (a) => a.queueStatus === "Waiting for Triage" && (a.queueArea || "General Clinic") === area,
   );
+  const active = appointments.find(
+    (a) => a.queueStatus === "Triage" && (a.queueArea || "General Clinic") === area,
+  );
+  const eligible = active ? [active, ...waiting] : waiting;
   const [id, setId] = useState("");
   const [priority, setPriority] = useState<
     "Normal" | "Priority" | "Urgent" | "Emergency"
@@ -1453,8 +1613,9 @@ function TriageForm({ area }: { area: CareArea }) {
     firstAid: "",
   });
   useEffect(() => {
-    if (!eligible.some((a) => a.id === id)) setId(eligible[0]?.id || "");
-  }, [eligible, id]);
+    if (active) setId(active.id);
+    else if (!eligible.some((a) => a.id === id)) setId(eligible[0]?.id || "");
+  }, [active, eligible, id]);
   const isAnimalBite = area === "Animal Bite Center";
   const animalAssessmentComplete = !isAnimalBite || Boolean(
     animalExposure.animal.trim() &&
@@ -1471,8 +1632,9 @@ function TriageForm({ area }: { area: CareArea }) {
       </p>
       <p className="mb-5 rounded-xl border border-primary/15 bg-primary-soft px-3 py-2 text-xs text-primary">
         Queue rule: Emergency routes immediately. Otherwise, Urgent is called
-        before Priority, Priority before Normal, and each level follows issued
-        queue-number order.
+        before Priority, Priority before Normal. Within the same priority,
+        online and walk-in visits alternate from the earliest waiting visit,
+        falling back when one type has no waiting patient.
       </p>
       <div className="grid md:grid-cols-2 gap-4">
         <div>
@@ -1522,6 +1684,15 @@ function TriageForm({ area }: { area: CareArea }) {
           </div>
         ))}
       </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-primary/15 bg-primary-soft/50 p-3">
+        <div className="flex-1 text-sm">
+          <p className="font-semibold">Nurse / triage service status</p>
+          <p className="text-xs text-muted-foreground">{active ? `Queue ${active.queueNumber} is currently being assessed.` : "Select a waiting patient, then start the assessment to show the number on the public queue board."}</p>
+        </div>
+        <Button type="button" variant="outline" disabled={!id || Boolean(active)} onClick={() => { if (startTriage(id)) return; }}>
+          Start assessment
+        </Button>
+      </div>
       <div className="mt-4">
         <Label>Chief complaint / initial assessment</Label>
         <Textarea
@@ -1545,7 +1716,7 @@ function TriageForm({ area }: { area: CareArea }) {
         </div>
       ) : null}
       <Button
-        disabled={!id || !animalAssessmentComplete}
+        disabled={!id || !active || active.id !== id || !animalAssessmentComplete}
         onClick={() => {
           const completed = completeTriage({ appointmentId: id, priority, ...f, ...(isAnimalBite ? { animalExposure } : {}) });
           if (!completed) return;

@@ -48,10 +48,10 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
   const [careArea, setCareArea] = useState<"General Clinic" | "Animal Bite Center">(assignedCareArea);
   useEffect(() => setCareArea(assignedCareArea), [assignedCareArea]);
   useEffect(() => {
-    void publishPublicQueueArea(appointments, assignedCareArea).catch(
+    void publishPublicQueueArea(appointments, assignedCareArea, staffUsers).catch(
       () => undefined,
     );
-  }, [appointments, assignedCareArea]);
+  }, [appointments, assignedCareArea, staffUsers]);
   const ready = appointments.filter(
     (appointment) =>
       (appointment.queueArea || "General Clinic") === careArea &&

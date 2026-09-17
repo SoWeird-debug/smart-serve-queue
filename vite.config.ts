@@ -9,24 +9,33 @@ import { componentTagger } from "lovable-tagger";
 type PublicQueueItem = {
   id: string;
   queueNumber: string;
-  queueStatus: "Waiting for Triage" | "Waiting for Doctor" | "Called" | "In Consultation";
+  queueStatus: "Waiting for Triage" | "Triage" | "Waiting for Doctor" | "Called" | "In Consultation";
   room: string;
   queueArea: "General Clinic" | "Animal Bite Center";
   triagePriority: "Normal" | "Priority" | "Urgent" | "Emergency";
   queueEnteredAt: string;
   createdAt: string;
 };
+type PublicQueueDoctor = {
+  id: string;
+  fullName: string;
+  doctorStatus: "Available" | "With patient" | "On break" | "Off duty" | "On leave";
+  queueArea: "General Clinic" | "Animal Bite Center";
+};
 type PublicQueueState = {
   appointments: PublicQueueItem[];
+  doctors: PublicQueueDoctor[];
   updatedAt: string;
 };
 
 let publicQueueState: PublicQueueState = {
   appointments: [],
+  doctors: [],
   updatedAt: "",
 };
 const queueStatuses = new Set<PublicQueueItem["queueStatus"]>([
   "Waiting for Triage",
+  "Triage",
   "Waiting for Doctor",
   "Called",
   "In Consultation",
@@ -36,6 +45,13 @@ const queuePriorities = new Set<PublicQueueItem["triagePriority"]>([
   "Priority",
   "Urgent",
   "Emergency",
+]);
+const doctorStatuses = new Set<PublicQueueDoctor["doctorStatus"]>([
+  "Available",
+  "With patient",
+  "On break",
+  "Off duty",
+  "On leave",
 ]);
 const isLoopbackRequest = (address?: string) =>
   Boolean(address && (address === "::1" || address === "127.0.0.1" || address.startsWith("::ffff:127.")));
@@ -60,7 +76,7 @@ const sanitizeQueueState = (
   input: unknown,
   area?: PublicQueueItem["queueArea"],
 ): PublicQueueState => {
-  const source = input as { appointments?: unknown };
+  const source = input as { appointments?: unknown; doctors?: unknown };
   const appointments = Array.isArray(source?.appointments)
     ? source.appointments
         .map((entry) => {
@@ -94,7 +110,24 @@ const sanitizeQueueState = (
         .filter((item): item is PublicQueueItem => Boolean(item))
         .slice(0, 100)
     : [];
-  return { appointments, updatedAt: new Date().toISOString() };
+  const doctors = Array.isArray(source?.doctors)
+    ? source.doctors
+        .map((entry) => {
+          const doctor = entry as Record<string, unknown>;
+          const doctorStatus = String(doctor.doctorStatus || "Available") as PublicQueueDoctor["doctorStatus"];
+          const queueArea = area || (doctor.queueArea === "Animal Bite Center" ? "Animal Bite Center" : "General Clinic");
+          if (!doctor.id || !String(doctor.fullName || "").trim() || !doctorStatuses.has(doctorStatus)) return null;
+          return {
+            id: String(doctor.id).slice(0, 128),
+            fullName: String(doctor.fullName).trim().slice(0, 100),
+            doctorStatus,
+            queueArea,
+          };
+        })
+        .filter((doctor): doctor is PublicQueueDoctor => Boolean(doctor))
+        .slice(0, 12)
+    : [];
+  return { appointments, doctors, updatedAt: new Date().toISOString() };
 };
 const isQueueArea = (value: unknown): value is PublicQueueItem["queueArea"] =>
   value === "General Clinic" || value === "Animal Bite Center";
@@ -145,6 +178,12 @@ function localQueueDisplay(): Plugin {
                 (appointment) => appointment.queueArea !== publishedArea,
               ),
               ...areaState.appointments,
+            ],
+            doctors: [
+              ...publicQueueState.doctors.filter(
+                (doctor) => doctor.queueArea !== publishedArea,
+              ),
+              ...areaState.doctors,
             ],
             updatedAt: areaState.updatedAt,
           };
