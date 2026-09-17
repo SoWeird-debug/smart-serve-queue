@@ -141,9 +141,32 @@
     @apply relative mx-auto rounded-[1.5rem] border-[14px] border-foreground/90 shadow-tv overflow-hidden bg-gradient-tv;
   }
 
+  .patient-mobile-scroll {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .patient-mobile-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
   .pulse-dot::before {
     content: '';
     @apply absolute inline-block w-2 h-2 rounded-full bg-current animate-ping opacity-75;
+  }
+}
+
+/* Keep mobile screens clean while preserving normal touch scrolling. */
+@media (max-width: 767px) {
+  html,
+  body,
+  * {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
   }
 }
 

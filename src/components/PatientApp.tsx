@@ -162,7 +162,9 @@ export function PatientApp() {
       <div className="phone-frame">
         {/* notch */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-foreground/90 rounded-b-2xl z-20" />
-        <div className="h-full overflow-y-auto pb-24 bg-background">
+        <div
+          className={`patient-mobile-scroll h-full overflow-y-auto pb-24 ${screen === "login" ? "bg-gradient-hero" : "bg-background"}`}
+        >
           {screen === "login" && (
             <LoginScreen
               onAuthenticated={authenticate}
@@ -405,7 +407,7 @@ function LoginScreen({
     onAuthenticated(patient.id, false);
   };
   return (
-    <div className="min-h-full bg-gradient-hero p-6 pt-12 text-primary-foreground flex flex-col">
+    <div className="min-h-full p-6 pt-12 text-primary-foreground flex flex-col">
       <div className="flex-1 flex flex-col items-center justify-center text-center">
         <div className="w-20 h-20 rounded-3xl bg-card/20 backdrop-blur flex items-center justify-center mb-4 shadow-glow">
           <Sparkles className="w-10 h-10" />
