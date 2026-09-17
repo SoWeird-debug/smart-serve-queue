@@ -18,6 +18,7 @@ import {
   Package,
   Pencil,
   Plus,
+  Search,
   Settings,
   ShieldCheck,
   Stethoscope,
@@ -2094,6 +2095,7 @@ function PatientPage({
   const [selected, setSelected] = useState<any>(null);
   const [editing, setEditing] = useState(false);
   const [barangayQuery, setBarangayQuery] = useState("");
+  const [barangayFilter, setBarangayFilter] = useState("all");
   const [selectedBarangayKey, setSelectedBarangayKey] = useState("");
   const [patientQuery, setPatientQuery] = useState("");
   const [barangayEditorOpen, setBarangayEditorOpen] = useState(false);
@@ -2141,10 +2143,12 @@ function PatientPage({
     return [...directory.values()]
       .sort((left, right) => left.name.localeCompare(right.name, "en-PH"));
   }, [barangayEntries, patients]);
-  const visibleBarangays = barangays.filter((barangay) =>
-    barangay.name
-      .toLocaleLowerCase("en-PH")
-      .includes(barangayQuery.trim().toLocaleLowerCase("en-PH")),
+  const visibleBarangays = barangays.filter(
+    (barangay) =>
+      (barangayFilter === "all" || barangay.key === barangayFilter) &&
+      barangay.name
+        .toLocaleLowerCase("en-PH")
+        .includes(barangayQuery.trim().toLocaleLowerCase("en-PH")),
   );
   const visiblePatients = patients
     .filter(
@@ -2261,16 +2265,39 @@ function PatientPage({
             </Button>
           }
         >
-          <div className="mb-4 max-w-md">
-            <Label htmlFor="barangay-search">Search barangay</Label>
-            <Input
-              id="barangay-search"
-              value={barangayQuery}
-              onChange={(event) => setBarangayQuery(event.target.value)}
-              placeholder="Type a barangay name"
-              className="mt-1"
-            />
+          <div className="mb-4 grid max-w-2xl gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="barangay-filter">Barangay</Label>
+              <select
+                id="barangay-filter"
+                value={barangayFilter}
+                onChange={(event) => setBarangayFilter(event.target.value)}
+                className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-3 text-sm"
+              >
+                <option value="all">All barangays</option>
+                {barangays.map((barangay) => (
+                  <option key={barangay.key} value={barangay.key}>
+                    {barangay.name} · {barangay.municipality}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="barangay-search">Search barangay</Label>
+              <Input
+                id="barangay-search"
+                value={barangayQuery}
+                onChange={(event) => setBarangayQuery(event.target.value)}
+                placeholder="Type a barangay name"
+                className="mt-1"
+              />
+            </div>
           </div>
+          {directoryNotice ? (
+            <p className="mb-4 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {directoryNotice}
+            </p>
+          ) : null}
           {visibleBarangays.length ? (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {visibleBarangays.map((barangay) => (
@@ -2296,6 +2323,22 @@ function PatientPage({
                   <Badge className="border-0 bg-card text-primary">
                     {barangay.count}
                   </Badge>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-35"
+                    aria-label={`Delete ${barangay.name}`}
+                    title={
+                      barangay.count
+                        ? "Barangays with registered patients cannot be deleted"
+                        : `Delete ${barangay.name}`
+                    }
+                    disabled={Boolean(barangay.count)}
+                    onClick={() => setDeletingBarangay(barangay)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               ))}
             </div>
@@ -3019,27 +3062,46 @@ function ServicePage({ services, add, update, remove }: any) {
         }
       />
       <Panel title="Service catalogue">
+        <div className="hidden border-b border-border pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground lg:grid lg:grid-cols-[minmax(190px,0.85fr)_minmax(280px,1.7fr)_140px_90px_44px] lg:gap-4">
+          <span>Service</span>
+          <span>Description</span>
+          <span>Schedule</span>
+          <span>Status</span>
+          <span className="text-center">View</span>
+        </div>
         {services.map((s: any) => (
-          <Row
+          <div
             key={s.id}
-            title={s.name}
-            detail={`${s.description} · ${s.capacity}/day · ${s.duration} min`}
-            badge="Active"
-            actions={
-              <Button
-                size="icon"
-                variant="outline"
-                title={`View ${s.name}`}
-                aria-label={`View ${s.name}`}
-                onClick={() => {
-                  setViewing({ ...s });
-                  setEditing(null);
-                }}
-              >
-                <Eye className="w-4 h-4" />
-              </Button>
-            }
-          />
+            className="grid gap-2 border-b border-border py-4 last:border-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center lg:grid-cols-[minmax(190px,0.85fr)_minmax(280px,1.7fr)_140px_90px_44px] lg:gap-4"
+          >
+            <div className="min-w-0">
+              <p className="font-semibold">{s.name}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {s.queueArea || "General Clinic"}
+              </p>
+            </div>
+            <p className="min-w-0 text-sm leading-5 text-muted-foreground">
+              {s.description || "No description recorded."}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {s.capacity}/day · {s.duration} min
+            </p>
+            <Badge className="w-fit border-0 bg-primary-soft text-primary">
+              Active
+            </Badge>
+            <Button
+              size="icon"
+              variant="outline"
+              title={`View ${s.name}`}
+              aria-label={`View ${s.name}`}
+              onClick={() => {
+                setViewing({ ...s });
+                setEditing(null);
+              }}
+            >
+              <Eye className="w-4 h-4" />
+            </Button>
+          </div>
         ))}
       </Panel>
       <Dialog open={creating} onOpenChange={setCreating}>
@@ -3626,6 +3688,7 @@ function StaffPage({
   const [form, setForm] = useState<AccountForm>(blankAccountForm);
   const [createRole, setCreateRole] = useState<StaffRole>("Front desk");
   const [error, setError] = useState("");
+  const [accountQuery, setAccountQuery] = useState("");
   const isDoctor = dialog === "doctor" || (dialog === "edit" && selected?.role === "Doctor");
   const isAdmin = dialog === "admin" || (dialog === "edit" && selected?.role === "Administrator");
 
@@ -3743,6 +3806,13 @@ function StaffPage({
         : dialog === "reset"
           ? "Set a new temporary password. The user must change it at first sign-in in the production version."
           : "Local prototype credentials route this user to the workspace assigned to their role.";
+  const visibleUsers = users.filter((user) =>
+    [user.fullName, user.username, user.role, user.assignedAreas?.join(" ")]
+      .filter(Boolean)
+      .join(" ")
+      .toLocaleLowerCase("en-PH")
+      .includes(accountQuery.trim().toLocaleLowerCase("en-PH")),
+  );
 
   return (
     <>
@@ -3777,41 +3847,75 @@ function StaffPage({
           <p className="mt-1 text-xs text-muted-foreground">Adds recovery and internal contact details for secure setup.</p>
         </div>
       </div>
-      <Panel title="Account directory">
-        {users.map((user) => {
-          const detail = [
-            `@${user.username}`,
-            user.active ? "Account active" : "Account disabled",
-            user.role === "Doctor" ? `Patient view: ${doctorAvailabilityLabel(user.doctorStatus)}` : "",
-            user.role === "Administrator" && user.recoveryEmail ? user.recoveryEmail : "",
-            `Assignment: ${user.assignedAreas?.includes("Animal Bite Center") ? "Animal Bite Center" : "General Clinic"}`,
-          ].filter(Boolean).join(" · ");
+      <Panel
+        title="Account directory"
+        action={
+          <div className="flex items-center gap-2">
+            <div className="relative hidden sm:block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={accountQuery}
+                onChange={(event) => setAccountQuery(event.target.value)}
+                placeholder="Search accounts"
+                className="h-9 w-52 pl-9 text-sm"
+              />
+            </div>
+            <Badge className="border-0 bg-primary-soft text-primary">{visibleUsers.length}</Badge>
+          </div>
+        }
+      >
+        <div className="hidden border-b border-border bg-muted/30 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground xl:grid xl:grid-cols-[minmax(210px,1.3fr)_minmax(125px,0.75fr)_minmax(120px,0.75fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(110px,0.7fr)_auto] xl:gap-3">
+          <span>Account holder</span>
+          <span>Username</span>
+          <span>Account status</span>
+          <span>Doctor availability</span>
+          <span>Assignment</span>
+          <span>Role</span>
+          <span className="text-center">Actions</span>
+        </div>
+        {visibleUsers.map((user) => {
+          const initials = user.fullName
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .map((name) => name[0])
+            .join("")
+            .toUpperCase();
+          const availability = user.role === "Doctor" ? doctorAvailabilityLabel(user.doctorStatus) : "Not applicable";
+          const availabilityTone = user.doctorStatus === "Available"
+            ? "bg-emerald-50 text-emerald-700"
+            : user.role === "Doctor"
+              ? "bg-amber-50 text-amber-700"
+              : "bg-muted text-muted-foreground";
           return (
-            <Row
+            <div
               key={user.id}
-              title={user.fullName}
-              detail={detail}
-              badge={user.role}
-              actions={
-                <>
-                  <Button size="icon" variant="outline" onClick={() => openEdit(user)} title="Edit account" aria-label={`Edit ${user.fullName}`}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button size="icon" variant="outline" onClick={() => openReset(user)} title="Reset temporary password" aria-label={`Reset password for ${user.fullName}`}>
-                    <KeyRound className="h-4 w-4" />
-                  </Button>
-                  <Button size="icon" variant="outline" onClick={() => update(user.id, { active: !user.active })} title={user.active ? "Disable account" : "Enable account"} aria-label={user.active ? `Disable ${user.fullName}` : `Enable ${user.fullName}`}>
-                    <ShieldCheck className={`h-4 w-4 ${user.active ? "text-secondary" : "text-muted-foreground"}`} />
-                  </Button>
-                  <Button size="icon" variant="destructive" onClick={() => window.confirm(`Delete ${user.fullName}? This removes their local login.`) && remove(user.id)} title="Delete account" aria-label={`Delete ${user.fullName}`}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </>
-              }
-            />
+              className="grid gap-3 border-b border-border px-3 py-4 transition-colors hover:bg-primary-soft/30 last:border-0 sm:grid-cols-2 xl:grid-cols-[minmax(210px,1.3fr)_minmax(125px,0.75fr)_minmax(120px,0.75fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(110px,0.7fr)_auto] xl:items-center xl:gap-3"
+            >
+              <div className="flex min-w-0 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary-soft text-xs font-bold text-primary">{initials}</span><p className="min-w-0 truncate font-semibold">{user.fullName}</p></div>
+              <p className="truncate font-mono text-sm text-muted-foreground">@{user.username}</p>
+              <span className={`flex w-fit items-center gap-1.5 text-sm font-medium ${user.active ? "text-emerald-600" : "text-muted-foreground"}`}><span className={`h-2 w-2 rounded-full ${user.active ? "bg-emerald-500" : "bg-slate-400"}`} />{user.active ? "Active" : "Disabled"}</span>
+              <Badge className={`w-fit border-0 ${availabilityTone}`}>{availability}</Badge>
+              <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><MapPin className="h-4 w-4 text-primary" />{user.assignedAreas?.includes("Animal Bite Center") ? "Animal Bite Center" : "General Clinic"}</span>
+              <Badge className="w-fit border-0 bg-primary-soft text-primary">{user.role}</Badge>
+              <div className="flex flex-wrap gap-1.5 xl:flex-nowrap">
+                <Button size="icon" variant="outline" onClick={() => openEdit(user)} title="Edit account" aria-label={`Edit ${user.fullName}`}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button size="icon" variant="outline" onClick={() => openReset(user)} title="Reset temporary password" aria-label={`Reset password for ${user.fullName}`}>
+                  <KeyRound className="h-4 w-4" />
+                </Button>
+                <Button size="icon" variant="outline" onClick={() => update(user.id, { active: !user.active })} title={user.active ? "Disable account" : "Enable account"} aria-label={user.active ? `Disable ${user.fullName}` : `Enable ${user.fullName}`}>
+                  <ShieldCheck className={`h-4 w-4 ${user.active ? "text-secondary" : "text-muted-foreground"}`} />
+                </Button>
+                <Button size="icon" variant="destructive" onClick={() => window.confirm(`Delete ${user.fullName}? This removes their local login.`) && remove(user.id)} title="Delete account" aria-label={`Delete ${user.fullName}`}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           );
         })}
-        {!users.length ? <Empty text="No login accounts yet. Select an icon above to create staff, doctor, or administrator access." /> : null}
+        {!visibleUsers.length ? <Empty text={users.length ? "No accounts match your search." : "No login accounts yet. Select an icon above to create staff, doctor, or administrator access."} /> : null}
       </Panel>
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && close()}>
         <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto rounded-2xl p-0">
