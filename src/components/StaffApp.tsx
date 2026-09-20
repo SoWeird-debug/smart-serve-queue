@@ -21,7 +21,11 @@ import {
   LocationPickerMap,
   type PinnedLocation,
 } from "@/components/LocationPickerMap";
-import { usePrototypeStore, type StaffUser } from "@/lib/prototype-store";
+import {
+  ONSITE_PATIENT_DEFAULT_PASSWORD,
+  usePrototypeStore,
+  type StaffUser,
+} from "@/lib/prototype-store";
 import { calculateAge } from "@/lib/patient-age";
 import { reverseGeocodePhilippineAddress } from "@/lib/location-address";
 import { appointmentPriority, orderDoctorQueue } from "@/lib/queue-priority";
@@ -187,32 +191,13 @@ export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
   ];
   return (
     <div className="space-y-6">
-      <div className="text-center max-w-3xl mx-auto">
-        <Badge
-          variant="secondary"
-          className="mb-2 bg-secondary-soft text-secondary border-0"
-        >
-          {isAnimalBiteWorkspace ? "Animal Bite Center" : "SmartServe General Clinic"} · {isNurseTriage ? "Nurse / Triage workspace" : "Front desk workspace"} · local prototype
-        </Badge>
+      {isNurseTriage ? <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/70 pb-5">
         <h2 className="text-2xl md:text-3xl font-display font-bold">
-          {isNurseTriage
-            ? isAnimalBiteWorkspace
-              ? "Animal Bite assessment before doctor handoff"
-              : "Patient assessment before doctor handoff"
-            : isAnimalBiteWorkspace
-              ? "Animal Bite patient intake and queue"
-              : "General Clinic patient intake and queue"}
+          {isAnimalBiteWorkspace
+            ? "Animal Bite nurse & triage"
+            : "General Clinic nurse & triage"}
         </h2>
-        <p className="text-muted-foreground text-sm mt-1">
-          {isNurseTriage
-            ? isAnimalBiteWorkspace
-              ? "Only Animal Bite Center patients appear here. Complete the required bite assessment before doctor handoff."
-              : "Only General Clinic patients awaiting triage appear here. Record the assessment before doctor handoff."
-            : isAnimalBiteWorkspace
-              ? "Check in, register or verify, add Animal Bite walk-ins, and manage only the Animal Bite queue."
-              : "Check in, register or verify, add General Clinic walk-ins, and manage only the General Clinic queue."}
-        </p>
-      </div>
+      </div> : null}
       {isNurseTriage ? (
         <TriageForm area={careArea} />
       ) : (
@@ -486,8 +471,8 @@ function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) 
     );
   });
   return (
-    <div className="bg-card border border-border rounded-2xl shadow-card overflow-hidden max-w-5xl mx-auto">
-      <div className="p-5 border-b border-border">
+    <div className="mx-auto flex max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-card lg:h-[calc(100dvh-18rem)]">
+      <div className="shrink-0 border-b border-border p-5">
         <h3 className="font-display font-bold text-lg">
           {area === "Animal Bite Center" ? "Animal Bite patient check-in" : "Scheduled patient check-in"}
         </h3>
@@ -512,6 +497,7 @@ function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) 
         ) : null}
         {error && <p className="text-sm text-destructive mt-2">{error}</p>}
       </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
       {scheduled.map((a: Appointment) => (
         <div
           key={a.id}
@@ -561,6 +547,7 @@ function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) 
           No scheduled {area === "Animal Bite Center" ? "Animal Bite" : "General Clinic"} appointments are awaiting check-in.
         </p>
       ) : null}
+      </div>
     </div>
   );
 }
@@ -935,7 +922,7 @@ function RegistrationForm({
     });
     onRegistered(patient.id);
     setRegistrationSuccess(
-      `${patient.fullName} was registered successfully. You can now continue to walk-in.`,
+      `${patient.fullName} was registered successfully. Portal sign-in: ${patient.patientNumber}. Temporary password: ${ONSITE_PATIENT_DEFAULT_PASSWORD}. Give these privately to the patient, then they can continue to walk-in.`,
     );
   };
   const identityFields = [
@@ -972,11 +959,11 @@ function RegistrationForm({
     return () => { active = false; };
   }, [form.municipality]);
   return (
-    <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
+    <section className="flex flex-col overflow-hidden bg-card border border-border rounded-2xl p-5 shadow-soft lg:h-[calc(100dvh-18rem)]">
       <h3 className="font-display font-bold text-lg">
         Manual patient registration
       </h3>
-      <div className="mt-5 space-y-5">
+      <div className="mt-5 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
         <section className="rounded-2xl border border-border bg-muted/20 p-4">
           <div className="mb-4">
             <h4 className="font-display font-bold">Patient identity</h4>
@@ -1260,7 +1247,6 @@ function RegistrationForm({
             />
           </div>
         </section>
-      </div>
       <div className="mt-5 rounded-2xl border border-border bg-muted/20 p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -1438,6 +1424,7 @@ function RegistrationForm({
             Continue to walk-in
           </Button>
         ) : null}
+      </div>
       </div>
     </section>
   );
@@ -1752,8 +1739,8 @@ function Queue({ appts, patients, call, absent, area }: any) {
     Normal: "bg-primary-soft text-primary",
   };
   return (
-    <div className="grid md:grid-cols-3 gap-4 max-w-5xl mx-auto">
-      <div className="md:col-span-2 space-y-4">
+    <div className="grid max-w-5xl gap-4 md:grid-cols-3 lg:h-[calc(100dvh-18rem)]">
+      <div className="flex min-h-0 flex-col gap-4 md:col-span-2">
         <div className="bg-gradient-primary text-primary-foreground rounded-2xl p-6">
           <p className="text-xs uppercase opacity-80">{area} · now serving</p>
           <p className="font-display font-extrabold text-5xl my-1">
@@ -1787,14 +1774,15 @@ function Queue({ appts, patients, call, absent, area }: any) {
             ) : null}
           </div>
         </div>
-        <div className="bg-card border border-border rounded-2xl overflow-hidden">
-          <div className="p-4 border-b border-border">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="shrink-0 border-b border-border p-4">
             <h3 className="font-display font-bold">Waiting to be called</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Urgent → Priority → Normal. Patients within the same level retain
               queue-number order.
             </p>
           </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
           {waiting.map((a: Appointment, index) => (
             <div
               key={a.id}
@@ -1824,9 +1812,10 @@ function Queue({ appts, patients, call, absent, area }: any) {
               No patient is ready for the doctor.
             </p>
           ) : null}
+          </div>
         </div>
       </div>
-      <div className="space-y-3">
+      <div className="space-y-3 lg:overflow-y-auto lg:pr-1">
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
           <p className="font-semibold">Emergency routing</p>
           <p className="mt-1 text-xs">

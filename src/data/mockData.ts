@@ -55,6 +55,10 @@ export interface Patient {
   nationality?: string;
   preferredLanguage?: string;
   email?: string;
+  /** Set only after the patient confirms ownership of their portal email. */
+  emailVerifiedAt?: string;
+  /** Prototype marker; Laravel will send and validate a signed verification link. */
+  emailVerificationRequestedAt?: string;
   alternateContact?: string;
   philHealthClientType?: "Member" | "Dependent" | "Not enrolled";
   philHealthPin?: string;
@@ -156,6 +160,25 @@ export interface PrescriptionItem {
   dispensedAt?: string;
 }
 
+export interface AnimalBiteVaccineDose {
+  doseNumber: 1 | 2 | 3;
+  date: string;
+  status: "Administered" | "Scheduled";
+  vaccineId?: string;
+  vaccineName?: string;
+  batch?: string;
+  administrationSite?: string;
+}
+
+export interface AnimalBiteTreatment {
+  exposureCategory: "Category I" | "Category II" | "Category III" | "For clinician classification";
+  vaccinePlan: "PEP vaccination plan" | "No rabies vaccine ordered" | "Refer / escalate";
+  rabiesImmunoglobulin: "Assess / not recorded" | "Indicated" | "Not indicated" | "Given / referred";
+  tetanusProtection: "Assess / not recorded" | "Indicated" | "Not indicated" | "Given / referred";
+  protocolNote?: string;
+  doses: AnimalBiteVaccineDose[];
+}
+
 export interface MedicalRecord {
   id: string;
   patientId: string;
@@ -173,6 +196,8 @@ export interface MedicalRecord {
   careArea?: "General Clinic" | "Animal Bite Center";
   followUpNumber?: number;
   followUpPlan?: { date: string; type: string; reason: string; building: string };
+  followUpPlans?: { date: string; type: string; reason: string; building: string }[];
+  animalBiteTreatment?: AnimalBiteTreatment;
 }
 
 export interface NotificationItem {

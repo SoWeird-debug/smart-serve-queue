@@ -24,6 +24,9 @@ import {
   LogIn,
   LogOut,
   FileText,
+  KeyRound,
+  Mail,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -110,12 +113,17 @@ export function PatientApp() {
   const [selectedDate, setSelectedDate] = useState<number>(
     new Date().getDate() + 1,
   );
+  const [securitySetupPatientId, setSecuritySetupPatientId] = useState<string | null>(null);
   const {
     patients,
     services,
     bookAppointment,
     registerPortalPatient,
     loginPatient,
+    needsPatientPasswordChange,
+    requestPatientEmailVerification,
+    confirmPatientEmailVerification,
+    changePatientPortalPassword,
     updatePatient,
     notifications,
     markNotificationRead,
@@ -128,11 +136,17 @@ export function PatientApp() {
       setScreen("login");
     }
   }, [me, patientId]);
+  useEffect(() => {
+    if (patientId && needsPatientPasswordChange(patientId)) {
+      setSecuritySetupPatientId(patientId);
+    }
+  }, [patientId, needsPatientPasswordChange]);
   const authenticate = (id: string, remember: boolean) => {
     if (remember) localStorage.setItem(rememberedSessionKey, id);
     else localStorage.removeItem(rememberedSessionKey);
     setPatientId(id);
     setScreen("home");
+    setSecuritySetupPatientId(needsPatientPasswordChange(id) ? id : null);
   };
   const signOut = () => {
     localStorage.removeItem(rememberedSessionKey);
@@ -281,11 +295,150 @@ export function PatientApp() {
           <BottomNav screen={screen} setScreen={navigate} />
         )}
       </div>
+      <FirstLoginSecurityDialog
+        patient={patients.find((patient) => patient.id === securitySetupPatientId) || null}
+        open={Boolean(securitySetupPatientId)}
+        requestVerification={requestPatientEmailVerification}
+        confirmVerification={confirmPatientEmailVerification}
+        changePassword={changePatientPortalPassword}
+        onComplete={() => setSecuritySetupPatientId(null)}
+      />
     </div>
   );
 }
 
 /* ---------------- screens ---------------- */
+
+function FirstLoginSecurityDialog({
+  patient,
+  open,
+  requestVerification,
+  confirmVerification,
+  changePassword,
+  onComplete,
+}: {
+  patient: Patient | null;
+  open: boolean;
+  requestVerification: (patientId: string, email: string) => boolean;
+  confirmVerification: (patientId: string) => boolean;
+  changePassword: (patientId: string, password: string) => boolean;
+  onComplete: () => void;
+}) {
+  const [email, setEmail] = useState(patient?.email || "");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setEmail(patient?.email || "");
+    setPassword("");
+    setConfirmPassword("");
+    setMessage("");
+    setError("");
+  }, [patient?.id]);
+  if (!patient) return null;
+  const emailVerified = Boolean(patient.emailVerifiedAt);
+  const verificationRequested = Boolean(patient.emailVerificationRequestedAt);
+  const request = () => {
+    if (!requestVerification(patient.id, email)) {
+      setError("Enter a valid Gmail address before requesting verification.");
+      return;
+    }
+    setError("");
+    setMessage(`A verification link was sent to ${email.trim()}.`);
+  };
+  const confirm = () => {
+    if (!confirmVerification(patient.id)) {
+      setError("Request an email verification link first.");
+      return;
+    }
+    setError("");
+    setMessage("Email verified. You can now create your new password.");
+  };
+  const savePassword = () => {
+    if (password.length < 8) {
+      setError("Create a password with at least 8 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("The passwords do not match.");
+      return;
+    }
+    if (!changePassword(patient.id, password)) {
+      setError("Verify the email first before creating a password.");
+      return;
+    }
+    onComplete();
+  };
+  return (
+    <Dialog open={open} onOpenChange={() => undefined}>
+      <DialogContent className="max-w-md rounded-2xl" showClose={false}>
+        <DialogHeader>
+          <div className="mb-2 grid h-11 w-11 place-items-center rounded-2xl bg-primary-soft text-primary">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
+          <DialogTitle className="font-display text-xl">Secure your patient account</DialogTitle>
+          <DialogDescription>
+            Before continuing, verify your email and replace the temporary onsite password.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="rounded-xl bg-muted/60 p-3 text-sm">
+            <span className="text-muted-foreground">Patient number</span>
+            <p className="font-semibold">{patient.patientNumber || "Patient number pending"}</p>
+          </div>
+          {!emailVerified ? (
+            <>
+              <div>
+                <Label htmlFor="first-login-email">Gmail address</Label>
+                <Input
+                  id="first-login-email"
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="name@gmail.com"
+                  className="mt-1"
+                />
+              </div>
+              <Button type="button" variant="outline" className="w-full" onClick={request}>
+                <Mail className="mr-2 h-4 w-4" />
+                {verificationRequested ? "Resend verification email" : "Verify Gmail"}
+              </Button>
+              {verificationRequested ? (
+                <Button type="button" className="w-full" onClick={confirm}>
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  I verified my Gmail
+                </Button>
+              ) : null}
+              <p className="text-xs leading-5 text-muted-foreground">
+                Prototype notice: this confirms the verification step locally. Laravel will send a real, single-use verification link to this address.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="rounded-xl border border-secondary/25 bg-secondary-soft px-3 py-2 text-sm text-secondary-foreground">
+                Gmail verified. Create a new password for future sign-ins.
+              </div>
+              <div>
+                <Label htmlFor="first-login-password">New password</Label>
+                <Input id="first-login-password" className="mt-1" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
+              </div>
+              <div>
+                <Label htmlFor="first-login-confirm-password">Confirm new password</Label>
+                <Input id="first-login-confirm-password" className="mt-1" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
+              </div>
+              <Button type="button" className="w-full" onClick={savePassword}>
+                <KeyRound className="mr-2 h-4 w-4" />Save new password
+              </Button>
+            </>
+          )}
+          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+          {message ? <p role="status" className="text-sm text-secondary-foreground">{message}</p> : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function LoginScreen({
   onAuthenticated,
@@ -356,7 +509,7 @@ function LoginScreen({
       const patient = login(form.mobile, form.password);
       if (!patient)
         return setError(
-          "Mobile number or password is not registered on this device.",
+          "Patient number or mobile number, or password, is incorrect.",
         );
       if (remember)
         localStorage.setItem(rememberedMobileKey, form.mobile.trim());
@@ -573,13 +726,15 @@ function LoginScreen({
               </>
             )}
             <div>
-              <Label className="text-xs">Mobile Number</Label>
+              <Label className="text-xs">
+                {mode === "login" ? "Patient number or mobile number" : "Mobile number"}
+              </Label>
               <Input
                 value={form.mobile}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, mobile: e.target.value }))
                 }
-                placeholder="+63 9XX XXX XXXX"
+                placeholder={mode === "login" ? "PT-000001 or +63 9XX XXX XXXX" : "+63 9XX XXX XXXX"}
                 className="rounded-xl"
               />
             </div>
@@ -596,21 +751,26 @@ function LoginScreen({
               />
             </div>
             {mode === "login" && (
-              <label className="flex items-start gap-2 rounded-xl bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={remember}
-                  onChange={(event) => setRemember(event.target.checked)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <strong className="text-foreground">
-                    Remember me on this device
-                  </strong>
-                  <br />
-                  Do not enable this on a shared or public device.
-                </span>
-              </label>
+              <>
+                <p className="rounded-xl border border-primary/15 bg-primary-soft px-3 py-2 text-xs text-primary">
+                  Registered onsite? Sign in with the patient number given by the clinic and the temporary password.
+                </p>
+                <label className="flex items-start gap-2 rounded-xl bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(event) => setRemember(event.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <strong className="text-foreground">
+                      Remember me on this device
+                    </strong>
+                    <br />
+                    Do not enable this on a shared or public device.
+                  </span>
+                </label>
+              </>
             )}
             {error && (
               <p className="text-xs text-destructive text-center">{error}</p>

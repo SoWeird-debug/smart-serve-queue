@@ -1,0 +1,90 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
+
+class StaffQueueApiTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_front_desk_can_check_in_a_scheduled_patient_and_a_queue_number_is_assigned(): void
+    {
+        $ids = $this->referenceIds();
+        $staff = User::factory()->create([
+            'role' => 'front_desk',
+            'is_active' => true,
+            'assigned_care_areas' => [$ids['care_area_id']],
+        ]);
+        Sanctum::actingAs($staff, ['front_desk']);
+        $appointmentId = $this->createScheduledAppointment($ids);
+
+        $this->postJson("/api/v1/staff/appointments/{$appointmentId}/check-in")
+            ->assertCreated()
+            ->assertJsonPath('data.queue_number', 1)
+            ->assertJsonPath('data.active_queue_number', 1)
+            ->assertJsonPath('data.source_visit_type', 'scheduled');
+
+        $this->assertDatabaseHas('appointments', [
+            'id' => $appointmentId,
+            'attendance_status' => 'present',
+            'status' => 'waiting_for_triage',
+        ]);
+    }
+
+    public function test_front_desk_can_add_an_existing_patient_as_a_walk_in(): void
+    {
+        $ids = $this->referenceIds();
+        $staff = User::factory()->create([
+            'role' => 'front_desk',
+            'is_active' => true,
+            'assigned_care_areas' => [$ids['care_area_id']],
+        ]);
+        Sanctum::actingAs($staff, ['front_desk']);
+
+        $this->postJson('/api/v1/staff/walk-ins', [
+            'patient_lookup' => 'PT-000001',
+            'service_id' => $ids['service_id'],
+        ])->assertCreated()
+            ->assertJsonPath('data.queue_number', 1)
+            ->assertJsonPath('data.source_visit_type', 'walk_in');
+    }
+
+    private function referenceIds(): array
+    {
+        $provinceId = \DB::table('provinces')->insertGetId(['name' => 'Isabela', 'created_at' => now(), 'updated_at' => now()]);
+        $municipalityId = \DB::table('municipalities')->insertGetId(['province_id' => $provinceId, 'name' => 'Jones', 'created_at' => now(), 'updated_at' => now()]);
+        $barangayId = \DB::table('barangays')->insertGetId(['municipality_id' => $municipalityId, 'name' => 'Dipangit', 'created_at' => now(), 'updated_at' => now()]);
+        $careAreaId = \DB::table('care_areas')->insertGetId(['name' => 'General Clinic', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $serviceId = \DB::table('services')->insertGetId(['care_area_id' => $careAreaId, 'name' => 'General Consultation', 'duration_minutes' => 20, 'daily_capacity' => 60, 'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $profileId = \DB::table('patient_profiles')->insertGetId([
+            'patient_number' => 'PT-000001', 'family_name' => 'Test', 'given_name' => 'Patient',
+            'date_of_birth' => '2000-01-01', 'sex' => 'female', 'mobile_number' => '09170000000',
+            'consent_to_treatment' => true, 'privacy_acknowledged' => true,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        \DB::table('patient_addresses')->insert([
+            'patient_profile_id' => $profileId, 'barangay_id' => $barangayId, 'address_line' => 'Purok 1',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        return compact('careAreaId', 'serviceId', 'profileId') + [
+            'care_area_id' => $careAreaId,
+            'service_id' => $serviceId,
+            'profile_id' => $profileId,
+        ];
+    }
+
+    private function createScheduledAppointment(array $ids): int
+    {
+        return \DB::table('appointments')->insertGetId([
+            'patient_profile_id' => $ids['profile_id'], 'service_id' => $ids['service_id'],
+            'care_area_id' => $ids['care_area_id'], 'appointment_date' => today()->toDateString(),
+            'visit_type' => 'scheduled', 'attendance_status' => 'pending', 'status' => 'scheduled',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+}

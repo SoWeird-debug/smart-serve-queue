@@ -174,33 +174,11 @@ export function PharmacyApp() {
 
   return (
     <div className="space-y-6">
-      <div className="mx-auto max-w-2xl text-center">
-        <Badge
-          variant="secondary"
-          className="mb-2 border-0 bg-secondary-soft text-secondary"
-        >
-          Clinic pharmacy & inventory
-        </Badge>
-        <h2 className="font-display text-2xl font-bold md:text-3xl">
-          Verify, dispense, and keep medicine availability current
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Doctor-issued clinic prescriptions and live stock are shared in this
-          local workflow.
-        </p>
-      </div>
-
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="rounded-2xl border border-border bg-card p-5 shadow-soft">
           <div className="mb-4 flex gap-2">
             <ClipboardCheck className="h-5 w-5 text-primary" />
-            <div>
-              <h3 className="font-display font-bold">Patient dispensing</h3>
-              <p className="text-xs text-muted-foreground">
-                Find the patient, then select the doctor-issued medicine to
-                record what was released.
-              </p>
-            </div>
+            <h3 className="font-display font-bold">Patient dispensing</h3>
           </div>
           <Label>Find patient by private name or queue number</Label>
           <Input

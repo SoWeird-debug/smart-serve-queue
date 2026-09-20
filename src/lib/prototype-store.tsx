@@ -5,6 +5,7 @@ import {
 } from "@/data/mockData";
 import type {
   Appointment,
+  AnimalBiteTreatment,
   MedicineItem,
   MedicalRecord,
   Patient,
@@ -53,7 +54,17 @@ export type ImportSummary = {
   checkupsAdded: number;
   skipped: number;
 };
-type PortalAccount = { patientId: string; mobile: string; password: string };
+/**
+ * Prototype-only patient portal credentials. Laravel will replace this with
+ * hashed credentials and a first-login password-change flow.
+ */
+type PortalAccount = {
+  patientId: string;
+  mobile: string;
+  password: string;
+  passwordChangeRequired?: boolean;
+};
+export const ONSITE_PATIENT_DEFAULT_PASSWORD = "SmartServe@123";
 export type StaffRole =
   | "Front desk"
   | "Nurse / Triage"
@@ -179,7 +190,11 @@ type Store = {
     input: PortalRegistrationInput,
     password: string,
   ) => Patient | null;
-  loginPatient: (mobile: string, password: string) => Patient | null;
+  loginPatient: (identifier: string, password: string) => Patient | null;
+  needsPatientPasswordChange: (patientId: string) => boolean;
+  requestPatientEmailVerification: (patientId: string, email: string) => boolean;
+  confirmPatientEmailVerification: (patientId: string) => boolean;
+  changePatientPortalPassword: (patientId: string, password: string) => boolean;
   addWalkIn: (
     patientId: string,
     serviceId: string,
@@ -193,7 +208,10 @@ type Store = {
     notes: string,
     prescription: MedicalRecord["prescription"],
     doctorId: string,
-    followUp?: { date: string; type: string; reason: string },
+    followUp?:
+      | { date: string; type: string; reason: string }
+      | { date: string; type: string; reason: string }[],
+    animalBiteTreatment?: AnimalBiteTreatment,
   ) => void;
   updatePatient: (id: string, patch: Partial<Patient>) => void;
   deletePatient: (id: string) => void;
@@ -1244,7 +1262,22 @@ export function PrototypeStoreProvider({
           "Triage / intake",
           "Registered new patient",
           patient.id,
-          (d) => ({ ...d, patients: [patient, ...d.patients] }),
+          (d) => ({
+            ...d,
+            patients: [patient, ...d.patients],
+            // Onsite registration grants portal access immediately. The
+            // patient may sign in using their generated patient number (or
+            // mobile number) and the clinic's temporary default password.
+            accounts: [
+              ...d.accounts,
+              {
+                patientId: patient.id,
+                mobile: patient.contact.trim(),
+                password: ONSITE_PATIENT_DEFAULT_PASSWORD,
+                passwordChangeRequired: true,
+              },
+            ],
+          }),
         );
         return patient;
       },
@@ -1282,7 +1315,7 @@ export function PrototypeStoreProvider({
               ...d,
               accounts: [
                 ...d.accounts,
-                { patientId: existingPatient.id, mobile, password },
+                { patientId: existingPatient.id, mobile, password, passwordChangeRequired: false },
               ],
             }),
           );
@@ -1311,20 +1344,84 @@ export function PrototypeStoreProvider({
           ...d,
           patients: [patient, ...d.patients],
           accounts: [
-            ...d.accounts,
-            { patientId: patient.id, mobile, password },
+              ...d.accounts,
+            { patientId: patient.id, mobile, password, passwordChangeRequired: false },
           ],
         }));
         return patient;
       },
-      loginPatient: (mobile, password) => {
+      loginPatient: (identifier, password) => {
+        const normalizedIdentifier = identifier.trim().toLocaleLowerCase("en-PH");
         const account = data.accounts.find(
-          (item) => item.mobile === mobile.trim() && item.password === password,
+          (item) => {
+            const patient = data.patients.find((entry) => entry.id === item.patientId);
+            return (
+              item.password === password &&
+              (item.mobile.trim().toLocaleLowerCase("en-PH") === normalizedIdentifier ||
+                patient?.patientNumber?.toLocaleLowerCase("en-PH") === normalizedIdentifier)
+            );
+          },
         );
         return account
           ? data.patients.find((patient) => patient.id === account.patientId) ||
               null
           : null;
+      },
+      needsPatientPasswordChange: (patientId) =>
+        Boolean(
+          data.accounts.find((account) => account.patientId === patientId)
+            ?.passwordChangeRequired,
+        ),
+      requestPatientEmailVerification: (patientId, email) => {
+        const normalizedEmail = email.trim().toLocaleLowerCase("en-PH");
+        if (
+          !data.accounts.some((account) => account.patientId === patientId) ||
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+        )
+          return false;
+        change("Patient", "Requested portal email verification", patientId, (d) => ({
+          ...d,
+          patients: d.patients.map((patient) =>
+            patient.id === patientId
+              ? {
+                  ...patient,
+                  email: normalizedEmail,
+                  emailVerifiedAt: undefined,
+                  emailVerificationRequestedAt: now(),
+                }
+              : patient,
+          ),
+        }));
+        return true;
+      },
+      confirmPatientEmailVerification: (patientId) => {
+        const patient = data.patients.find((entry) => entry.id === patientId);
+        if (!patient?.email || !patient.emailVerificationRequestedAt) return false;
+        change("Patient", "Confirmed portal email verification", patientId, (d) => ({
+          ...d,
+          patients: d.patients.map((entry) =>
+            entry.id === patientId
+              ? { ...entry, emailVerifiedAt: now() }
+              : entry,
+          ),
+        }));
+        return true;
+      },
+      changePatientPortalPassword: (patientId, password) => {
+        if (
+          password.length < 8 ||
+          !data.patients.find((patient) => patient.id === patientId)?.emailVerifiedAt
+        )
+          return false;
+        change("Patient", "Changed portal password after email verification", patientId, (d) => ({
+          ...d,
+          accounts: d.accounts.map((account) =>
+            account.patientId === patientId
+              ? { ...account, password, passwordChangeRequired: false }
+              : account,
+          ),
+        }));
+        return true;
       },
       addWalkIn: (patientId, serviceId, reason, expectedCareArea) => {
         const service = data.services.find((item) => item.id === serviceId);
@@ -1485,7 +1582,7 @@ export function PrototypeStoreProvider({
           }),
         );
       },
-      completeConsultation: (id, diagnosis, notes, prescription, doctorId, followUp) => {
+      completeConsultation: (id, diagnosis, notes, prescription, doctorId, followUp, animalBiteTreatment) => {
         const clinician = data.staffUsers.find(
           (user) =>
             user.id === doctorId && user.role === "Doctor" && user.active,
@@ -1523,25 +1620,33 @@ export function PrototypeStoreProvider({
             const appointment = d.appointments.find((a) => a.id === id);
             if (!appointment) return d;
             const recordId = crypto.randomUUID();
-            const followUpAppointment = followUp?.date
-              ? {
-                  id: crypto.randomUUID(),
-                  patientId: appointment.patientId,
-                  serviceId: appointment.serviceId,
-                  date: followUp.date,
-                  timeSlot: "Doctor follow-up",
-                  queueNumber: "",
-                  attendanceStatus: "Pending" as const,
-                  queueStatus: "Scheduled" as const,
-                  room: appointment.room || "Super Health Center",
-                  createdAt: now(),
-                  queueArea: appointment.queueArea || "General Clinic",
-                  parentAppointmentId: appointment.id,
-                  followUpType: followUp.type,
-                  followUpReason: followUp.reason,
-                  followUpNumber: (appointment.followUpNumber || 0) + 1,
-                }
-              : null;
+            const requestedFollowUps = (Array.isArray(followUp)
+              ? followUp
+              : followUp?.date
+                ? [followUp]
+                : []
+            ).filter((item) => item.date);
+            const followUpPlans = requestedFollowUps.map((item) => ({
+              ...item,
+              building: appointment.room || "Super Health Center",
+            }));
+            const followUpAppointments = requestedFollowUps.map((item, index) => ({
+              id: crypto.randomUUID(),
+              patientId: appointment.patientId,
+              serviceId: appointment.serviceId,
+              date: item.date,
+              timeSlot: "Doctor follow-up",
+              queueNumber: "",
+              attendanceStatus: "Pending" as const,
+              queueStatus: "Scheduled" as const,
+              room: appointment.room || "Super Health Center",
+              createdAt: now(),
+              queueArea: appointment.queueArea || "General Clinic",
+              parentAppointmentId: appointment.id,
+              followUpType: item.type,
+              followUpReason: item.reason,
+              followUpNumber: (appointment.followUpNumber || 0) + index + 1,
+            }));
             return {
               ...d,
               medicalRecords: [
@@ -1552,9 +1657,9 @@ export function PrototypeStoreProvider({
                   parentConsultationId: appointment.parentAppointmentId,
                   careArea: appointment.queueArea || "General Clinic",
                   followUpNumber: appointment.followUpNumber,
-                  followUpPlan: followUp?.date
-                    ? { ...followUp, building: appointment.room || "Super Health Center" }
-                    : undefined,
+                  followUpPlan: followUpPlans[0],
+                  followUpPlans: followUpPlans.length ? followUpPlans : undefined,
+                  animalBiteTreatment,
                   date: new Date().toISOString().slice(0, 10),
                   clinicianId: clinician.id,
                   clinician: clinician.fullName,
@@ -1567,11 +1672,22 @@ export function PrototypeStoreProvider({
                 },
                 ...d.medicalRecords,
               ],
-              appointments: followUpAppointment
-                ? [followUpAppointment, ...d.appointments.map((a) => a.id === id ? { ...a, queueStatus: "Consultation Completed" as const } : a)]
+              appointments: followUpAppointments.length
+                ? [...followUpAppointments, ...d.appointments.map((a) => a.id === id ? { ...a, queueStatus: "Consultation Completed" as const } : a)]
                 : d.appointments.map((a) => a.id === id ? { ...a, queueStatus: "Consultation Completed" as const } : a),
-              notifications: followUpAppointment
-                ? [{ id: crypto.randomUUID(), patientId: appointment.patientId, title: "Follow-up scheduled", message: `${followUp.type} is scheduled for ${followUp.date} at ${followUpAppointment.room}.`, createdAt: now(), read: false, type: "reminder" as const }, ...d.notifications].slice(0, 100)
+              notifications: followUpAppointments.length
+                ? [
+                    ...followUpAppointments.map((followUpAppointment, index) => ({
+                      id: crypto.randomUUID(),
+                      patientId: appointment.patientId,
+                      title: "Follow-up scheduled",
+                      message: `${requestedFollowUps[index].type} is scheduled for ${requestedFollowUps[index].date} at ${followUpAppointment.room}.`,
+                      createdAt: now(),
+                      read: false,
+                      type: "reminder" as const,
+                    })),
+                    ...d.notifications,
+                  ].slice(0, 100)
                 : d.notifications,
             };
           },

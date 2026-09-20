@@ -6,6 +6,8 @@ import {
   Pill,
   Plus,
   Search,
+  Settings2,
+  Syringe,
   Trash2,
   UserRound,
 } from "lucide-react";
@@ -15,7 +17,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { MedicalRecord } from "@/data/mockData";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import type { AnimalBiteTreatment, MedicalRecord } from "@/data/mockData";
 import { cn } from "@/lib/utils";
 import {
   usePrototypeStore,
@@ -69,6 +79,7 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
   const [instructions, setInstructions] = useState("");
   const [prescription, setPrescription] = useState<PrescriptionDraft[]>([]);
   const [prescriptionError, setPrescriptionError] = useState("");
+  const [animalBiteError, setAnimalBiteError] = useState("");
   const [diagnosis, setDiagnosis] = useState(
     "Acute upper respiratory infection",
   );
@@ -78,6 +89,18 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpType, setFollowUpType] = useState("Follow-up check-up");
   const [followUpReason, setFollowUpReason] = useState("");
+  const [animalBitePlan, setAnimalBitePlan] = useState({
+    exposureCategory: "For clinician classification" as AnimalBiteTreatment["exposureCategory"],
+    vaccinePlan: "PEP vaccination plan" as AnimalBiteTreatment["vaccinePlan"],
+    vaccineId: "",
+    dose1Date: new Date().toISOString().slice(0, 10),
+    dose2Date: "",
+    dose3Date: "",
+    administrationSite: "",
+    rabiesImmunoglobulin: "Assess / not recorded" as AnimalBiteTreatment["rabiesImmunoglobulin"],
+    tetanusProtection: "Assess / not recorded" as AnimalBiteTreatment["tetanusProtection"],
+    protocolNote: "",
+  });
   const availableMedicines = useMemo(
     () => medicines.filter((medicine) => medicine.stock > 0 && (careArea === "Animal Bite Center" ? medicine.inventoryArea === "Animal Bite Center" : medicine.inventoryArea !== "Animal Bite Center")),
     [medicines, careArea],
@@ -91,6 +114,15 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
         .includes(query),
     );
   }, [availableMedicines, medicineQuery]);
+  const availableRabiesVaccines = useMemo(
+    () =>
+      availableMedicines.filter(
+        (medicine) =>
+          medicine.category === "Vaccine" ||
+          /rabies|anti-rabies/i.test(`${medicine.name} ${medicine.strength}`),
+      ),
+    [availableMedicines],
+  );
   const availableConsultationTemplates = useMemo(
     () => consultationTemplates.filter((template) => template.active),
     [consultationTemplates],
@@ -125,7 +157,33 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
     setIsMedicinePickerOpen(false);
     setTemplateQuery("");
     setIsTemplatePickerOpen(false);
+    setAnimalBiteError("");
+    setAnimalBitePlan({
+      exposureCategory: "For clinician classification",
+      vaccinePlan: "PEP vaccination plan",
+      vaccineId: "",
+      dose1Date: new Date().toISOString().slice(0, 10),
+      dose2Date: "",
+      dose3Date: "",
+      administrationSite: "",
+      rabiesImmunoglobulin: "Assess / not recorded",
+      tetanusProtection: "Assess / not recorded",
+      protocolNote: "",
+    });
   }, [id]);
+
+  useEffect(() => {
+    setDiagnosis(
+      careArea === "Animal Bite Center"
+        ? "Animal bite exposure"
+        : "Acute upper respiratory infection",
+    );
+    setNotes(
+      careArea === "Animal Bite Center"
+        ? "Exposure assessed. Document the PEP decision and vaccination plan below."
+        : "Advise rest, fluids, and return if symptoms worsen.",
+    );
+  }, [careArea]);
 
   const appointment = ready.find((item) => item.id === id);
   const patient =
@@ -137,6 +195,10 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
   const medicine = availableMedicines.find((item) => item.id === medicineId);
   const followUpEnabled = Boolean(
     appointment && services.find((service) => service.id === appointment.serviceId)?.followUpEligible,
+  );
+  const isAnimalBiteVisit = careArea === "Animal Bite Center";
+  const selectedRabiesVaccine = availableRabiesVaccines.find(
+    (item) => item.id === animalBitePlan.vaccineId,
   );
 
   const selectMedicine = (selectedId: string) => {
@@ -189,80 +251,141 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
   const complete = () => {
     if (!appointment || !diagnosis.trim() || currentDoctor?.role !== "Doctor")
       return;
+    if (
+      isAnimalBiteVisit &&
+      animalBitePlan.vaccinePlan === "PEP vaccination plan" &&
+      (!selectedRabiesVaccine || !animalBitePlan.dose1Date)
+    ) {
+      setAnimalBiteError(
+        "Select the in-stock rabies vaccine used and record the first-dose administration date before saving a PEP plan.",
+      );
+      return;
+    }
+    const doseDates = [
+      animalBitePlan.dose1Date,
+      animalBitePlan.dose2Date,
+      animalBitePlan.dose3Date,
+    ].filter(Boolean);
+    if (isAnimalBiteVisit && doseDates.some((date, index) => index > 0 && date < doseDates[index - 1])) {
+      setAnimalBiteError("Enter vaccine dose dates in chronological order.");
+      return;
+    }
+    const animalBiteTreatment: AnimalBiteTreatment | undefined = isAnimalBiteVisit
+      ? {
+          exposureCategory: animalBitePlan.exposureCategory,
+          vaccinePlan: animalBitePlan.vaccinePlan,
+          rabiesImmunoglobulin: animalBitePlan.rabiesImmunoglobulin,
+          tetanusProtection: animalBitePlan.tetanusProtection,
+          protocolNote: animalBitePlan.protocolNote.trim(),
+          doses: [
+            animalBitePlan.dose1Date
+              ? {
+                  doseNumber: 1,
+                  date: animalBitePlan.dose1Date,
+                  status: "Administered" as const,
+                  vaccineId: selectedRabiesVaccine?.id,
+                  vaccineName: selectedRabiesVaccine
+                    ? `${selectedRabiesVaccine.name} ${selectedRabiesVaccine.strength}`
+                    : undefined,
+                  batch: selectedRabiesVaccine?.batch,
+                  administrationSite: animalBitePlan.administrationSite.trim() || undefined,
+                }
+              : null,
+            animalBitePlan.dose2Date
+              ? {
+                  doseNumber: 2,
+                  date: animalBitePlan.dose2Date,
+                  status: "Scheduled" as const,
+                  vaccineId: selectedRabiesVaccine?.id,
+                  vaccineName: selectedRabiesVaccine
+                    ? `${selectedRabiesVaccine.name} ${selectedRabiesVaccine.strength}`
+                    : undefined,
+                  batch: selectedRabiesVaccine?.batch,
+                }
+              : null,
+            animalBitePlan.dose3Date
+              ? {
+                  doseNumber: 3,
+                  date: animalBitePlan.dose3Date,
+                  status: "Scheduled" as const,
+                  vaccineId: selectedRabiesVaccine?.id,
+                  vaccineName: selectedRabiesVaccine
+                    ? `${selectedRabiesVaccine.name} ${selectedRabiesVaccine.strength}`
+                    : undefined,
+                  batch: selectedRabiesVaccine?.batch,
+                }
+              : null,
+          ].filter(Boolean) as AnimalBiteTreatment["doses"],
+        }
+      : undefined;
+    const vaccineFollowUps = animalBiteTreatment?.doses
+      .filter((dose) => dose.status === "Scheduled")
+      .map((dose) => ({
+        date: dose.date,
+        type: `Rabies vaccine dose ${dose.doseNumber}`,
+        reason: "Animal Bite PEP follow-up",
+      }));
     completeConsultation(
       appointment.id,
       diagnosis.trim(),
       notes.trim(),
       prescription,
       currentDoctor.id,
-      followUpDate
+      isAnimalBiteVisit
+        ? vaccineFollowUps
+        : followUpDate
         ? { date: followUpDate, type: followUpType, reason: followUpReason }
         : undefined,
+      animalBiteTreatment,
     );
   };
 
   return (
     <div className="space-y-6">
-      <div className="text-center max-w-2xl mx-auto">
-        <Badge
-          variant="secondary"
-          className="mb-2 bg-primary-soft text-primary border-0"
-        >
-          Clinical workspace
-        </Badge>
-        <h2 className="text-2xl md:text-3xl font-display font-bold">
-          Review triage, document care, and prescribe clinic stock
-        </h2>
-        <p className="text-muted-foreground text-sm mt-1">
-          Clinic prescriptions are saved with the consultation for Pharmacy to
-          verify and dispense. External prescriptions remain outside SmartServe.
-        </p>
+      <div className="flex justify-end border-b border-border/70 pb-4">
+        {currentDoctor?.role === "Doctor" ? (
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button size="icon" variant="outline" title="Set patient-facing availability" aria-label="Set patient-facing availability">
+                <Settings2 className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Patient-facing availability</DialogTitle>
+                <DialogDescription>Choose the status patients see before booking.</DialogDescription>
+              </DialogHeader>
+              <select
+                aria-label="Your availability"
+                value={currentDoctor.doctorStatus || "Available"}
+                onChange={(event) =>
+                  updateStaffUser(currentDoctor.id, {
+                    doctorStatus: event.target.value as DoctorAvailability,
+                  })
+                }
+                className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm font-medium"
+              >
+                {["Available", "With patient", "On break", "Off duty", "On leave"].map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </div>
-      {currentDoctor?.role === "Doctor" ? (
-        <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/15 bg-primary-soft/50 px-4 py-3">
-          <div>
-            <p className="text-sm font-semibold">Your patient-facing availability</p>
-            <p className="text-xs text-muted-foreground">Patients see a privacy-safe availability message before booking.</p>
-          </div>
-          <select
-            aria-label="Your availability"
-            value={currentDoctor.doctorStatus || "Available"}
-            onChange={(event) =>
-              updateStaffUser(currentDoctor.id, {
-                doctorStatus: event.target.value as DoctorAvailability,
-              })
-            }
-            className="h-10 rounded-xl border border-input bg-background px-3 text-sm font-medium"
-          >
-            {[
-              "Available",
-              "With patient",
-              "On break",
-              "Off duty",
-              "On leave",
-            ].map((status) => (
-              <option key={status} value={status}>{status}</option>
-            ))}
-          </select>
-        </div>
-      ) : null}
-      <div className="mx-auto flex max-w-2xl gap-2 rounded-2xl bg-muted p-1">
-        {[assignedCareArea].map((area) => (
-          <Button key={area} type="button" variant={careArea === area ? "default" : "ghost"} className="flex-1" onClick={() => setCareArea(area)}>{area}</Button>
-        ))}
-      </div>
-      <div className="grid lg:grid-cols-[280px,1fr] gap-5">
-        <aside className="bg-card border border-border rounded-2xl p-4 shadow-soft">
+      <div className="grid min-h-0 gap-5 lg:grid-cols-[300px,minmax(0,1fr)]">
+        <aside className="flex min-h-0 flex-col rounded-2xl border border-border bg-card p-4 shadow-soft lg:max-h-[calc(100dvh-13rem)]">
           <div className="flex items-center gap-2 mb-4">
             <UserRound className="w-5 h-5 text-primary" />
             <h3 className="font-display font-bold">Ready for consultation</h3>
           </div>
+          <div className="min-h-0 space-y-2 overflow-y-auto pr-1">
           {ready.map((item) => (
             <button
               key={item.id}
               onClick={() => setId(item.id)}
               className={cn(
-                "w-full text-left rounded-xl p-3 border mb-2",
+                "w-full text-left rounded-xl border p-3",
                 id === item.id
                   ? "border-primary bg-primary-soft"
                   : "border-border",
@@ -286,8 +409,9 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
               No patient is currently being served.
             </p>
           ) : null}
+          </div>
         </aside>
-        <div className="space-y-5">
+        <div className="space-y-5 lg:max-h-[calc(100dvh-13rem)] lg:overflow-y-auto lg:pr-1">
           {patient && appointment ? (
             <>
               <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
@@ -326,7 +450,16 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                   </div>
                 ) : null}
               </section>
-              <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
+              {isAnimalBiteVisit ? (
+                <AnimalBiteVaccinationPlan
+                  plan={animalBitePlan}
+                  setPlan={setAnimalBitePlan}
+                  vaccines={availableRabiesVaccines}
+                  selectedVaccine={selectedRabiesVaccine}
+                  error={animalBiteError}
+                />
+              ) : null}
+              {!isAnimalBiteVisit ? <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
                 <div className="flex items-center gap-2 mb-4">
                   <Pill className="w-5 h-5 text-secondary" />
                   <div>
@@ -535,7 +668,7 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                   Stock is deducted only when Pharmacy records the actual
                   dispensing.
                 </p>
-              </section>
+              </section> : null}
               <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
                 <div className="flex items-center gap-2 mb-4">
                   <ClipboardPlus className="w-5 h-5 text-primary" />
@@ -543,7 +676,7 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                     Consultation record
                   </h3>
                 </div>
-                {availableConsultationTemplates.length ? (
+                {!isAnimalBiteVisit && availableConsultationTemplates.length ? (
                   <div className="relative mb-4">
                     <Label>Start from an admin consultation template</Label>
                     <Button
@@ -615,11 +748,15 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                       before completing the consultation.
                     </p>
                   </div>
-                ) : (
+                ) : !isAnimalBiteVisit ? (
                   <p className="mb-4 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
                     No active Admin consultation template is available. You can
                     still document this consultation manually.
                   </p>
+                ) : (
+                  <div className="mb-4 rounded-xl border border-primary/15 bg-primary-soft/40 px-4 py-3 text-xs text-muted-foreground">
+                    The Animal Bite vaccination record above is used instead of a general consultation template. Add any case-specific assessment details below.
+                  </div>
                 )}
                 <Label>Assessment / diagnosis</Label>
                 <Input
@@ -633,7 +770,7 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                   onChange={(event) => setNotes(event.target.value)}
                   className="mt-1 min-h-24"
                 />
-                {followUpEnabled ? <div className="mt-4 rounded-xl border border-primary/15 bg-primary-soft/40 p-3">
+                {!isAnimalBiteVisit && followUpEnabled ? <div className="mt-4 rounded-xl border border-primary/15 bg-primary-soft/40 p-3">
                   <p className="text-sm font-semibold">Doctor follow-up plan</p>
                   <p className="mt-1 text-xs text-muted-foreground">Creates a linked follow-up appointment and patient alert. Animal Bite visits stay in the Animal Bite Center queue.</p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -648,7 +785,9 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                   onClick={complete}
                   className="mt-4"
                 >
-                  Complete consultation & send prescription
+                  {isAnimalBiteVisit
+                    ? "Complete assessment & save vaccination plan"
+                    : "Complete consultation & send prescription"}
                 </Button>
               </section>
               <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
@@ -665,8 +804,17 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
                       {record.date} · {record.clinician} · {record.status}
                     </p>
                     <p className="text-sm mt-2">{record.notes}</p>
-                    {record.followUpPlan ? (
-                      <p className="mt-2 rounded-lg bg-primary-soft px-3 py-2 text-xs text-primary">Next follow-up: {record.followUpPlan.type} on {record.followUpPlan.date} · {record.followUpPlan.reason || "Doctor review"}</p>
+                    {(record.followUpPlans || (record.followUpPlan ? [record.followUpPlan] : [])).map((plan) => (
+                      <p key={`${plan.date}-${plan.type}`} className="mt-2 rounded-lg bg-primary-soft px-3 py-2 text-xs text-primary">Follow-up: {plan.type} on {plan.date} · {plan.reason || "Doctor review"}</p>
+                    ))}
+                    {record.animalBiteTreatment ? (
+                      <div className="mt-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs">
+                        <p className="font-semibold">Animal Bite vaccination record</p>
+                        <p className="mt-1 text-muted-foreground">{record.animalBiteTreatment.exposureCategory} · {record.animalBiteTreatment.vaccinePlan} · RIG: {record.animalBiteTreatment.rabiesImmunoglobulin} · Tetanus: {record.animalBiteTreatment.tetanusProtection}</p>
+                        {record.animalBiteTreatment.doses.map((dose) => (
+                          <p key={`${dose.doseNumber}-${dose.date}`} className="mt-1 text-muted-foreground">Dose {dose.doseNumber}: {dose.status.toLowerCase()} on {dose.date}{dose.vaccineName ? ` · ${dose.vaccineName}` : ""}{dose.administrationSite ? ` · ${dose.administrationSite}` : ""}</p>
+                        ))}
+                      </div>
                     ) : null}
                     {record.prescription.length ? (
                       <p className="mt-2 text-xs text-muted-foreground">
@@ -696,6 +844,93 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function AnimalBiteVaccinationPlan({
+  plan,
+  setPlan,
+  vaccines,
+  selectedVaccine,
+  error,
+}: {
+  plan: {
+    exposureCategory: AnimalBiteTreatment["exposureCategory"];
+    vaccinePlan: AnimalBiteTreatment["vaccinePlan"];
+    vaccineId: string;
+    dose1Date: string;
+    dose2Date: string;
+    dose3Date: string;
+    administrationSite: string;
+    rabiesImmunoglobulin: AnimalBiteTreatment["rabiesImmunoglobulin"];
+    tetanusProtection: AnimalBiteTreatment["tetanusProtection"];
+    protocolNote: string;
+  };
+  setPlan: React.Dispatch<React.SetStateAction<typeof plan>>;
+  vaccines: ReturnType<typeof usePrototypeStore>["medicines"];
+  selectedVaccine?: ReturnType<typeof usePrototypeStore>["medicines"][number];
+  error: string;
+}) {
+  const update = <Key extends keyof typeof plan>(key: Key, value: (typeof plan)[Key]) =>
+    setPlan((current) => ({ ...current, [key]: value }));
+
+  return (
+    <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
+      <div className="flex items-start gap-3">
+        <div className="rounded-xl bg-warning/10 p-2 text-warning"><Syringe className="h-5 w-5" /></div>
+        <div>
+          <h3 className="font-display font-bold">Animal Bite vaccination plan</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Record the clinician's PEP decision, first-dose administration, and planned return doses. This form does not impose a fixed clinical schedule.</p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div>
+          <Label>Exposure classification</Label>
+          <select value={plan.exposureCategory} onChange={(event) => update("exposureCategory", event.target.value as AnimalBiteTreatment["exposureCategory"])} className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm">
+            <option>For clinician classification</option><option>Category I</option><option>Category II</option><option>Category III</option>
+          </select>
+        </div>
+        <div>
+          <Label>Care decision</Label>
+          <select value={plan.vaccinePlan} onChange={(event) => update("vaccinePlan", event.target.value as AnimalBiteTreatment["vaccinePlan"])} className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm">
+            <option>PEP vaccination plan</option><option>No rabies vaccine ordered</option><option>Refer / escalate</option>
+          </select>
+        </div>
+        <div>
+          <Label>Rabies vaccine used</Label>
+          <select value={plan.vaccineId} onChange={(event) => update("vaccineId", event.target.value)} disabled={plan.vaccinePlan !== "PEP vaccination plan"} className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60">
+            <option value="">Select in-stock vaccine</option>
+            {vaccines.map((vaccine) => <option key={vaccine.id} value={vaccine.id}>{vaccine.name} {vaccine.strength} · {vaccine.stock} in stock</option>)}
+          </select>
+        </div>
+      </div>
+
+      {plan.vaccinePlan === "PEP vaccination plan" && !vaccines.length ? (
+        <p className="mt-3 rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">No in-stock rabies vaccine is recorded for the Animal Bite Center. Update inventory or choose a referral decision.</p>
+      ) : null}
+      {selectedVaccine ? <p className="mt-3 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">Selected stock: <span className="font-medium text-foreground">{selectedVaccine.stock} {selectedVaccine.form.toLowerCase()}(s)</span> · Batch {selectedVaccine.batch} · expires {selectedVaccine.expiry}</p> : null}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div><Label>Rabies immunoglobulin</Label><select value={plan.rabiesImmunoglobulin} onChange={(event) => update("rabiesImmunoglobulin", event.target.value as AnimalBiteTreatment["rabiesImmunoglobulin"])} className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"><option>Assess / not recorded</option><option>Indicated</option><option>Not indicated</option><option>Given / referred</option></select></div>
+        <div><Label>Tetanus protection</Label><select value={plan.tetanusProtection} onChange={(event) => update("tetanusProtection", event.target.value as AnimalBiteTreatment["tetanusProtection"])} className="mt-1 h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"><option>Assess / not recorded</option><option>Indicated</option><option>Not indicated</option><option>Given / referred</option></select></div>
+        <div><Label>Administration site</Label><Input className="mt-1" value={plan.administrationSite} onChange={(event) => update("administrationSite", event.target.value)} placeholder="e.g. Left deltoid" /></div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-border p-4">
+        <div className="flex items-center justify-between gap-3"><p className="text-sm font-semibold">Vaccine doses and return visits</p><Badge variant="secondary" className="bg-primary-soft text-primary">Clinic protocol dates</Badge></div>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <div><Label>Dose 1 — administered</Label><Input className="mt-1" type="date" value={plan.dose1Date} disabled={plan.vaccinePlan !== "PEP vaccination plan"} onChange={(event) => update("dose1Date", event.target.value)} /></div>
+          <div><Label>Dose 2 — return visit</Label><Input className="mt-1" type="date" value={plan.dose2Date} disabled={plan.vaccinePlan !== "PEP vaccination plan"} onChange={(event) => update("dose2Date", event.target.value)} /></div>
+          <div><Label>Dose 3 — return visit</Label><Input className="mt-1" type="date" value={plan.dose3Date} disabled={plan.vaccinePlan !== "PEP vaccination plan"} onChange={(event) => update("dose3Date", event.target.value)} /></div>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">Scheduled dose dates automatically create Animal Bite follow-up appointments and patient alerts when the consultation is completed.</p>
+      </div>
+
+      <Label className="mt-4 block">Protocol / clinical note</Label>
+      <Textarea className="mt-1 min-h-20" value={plan.protocolNote} onChange={(event) => update("protocolNote", event.target.value)} placeholder="Document protocol decision, wound management, referral, or return instructions." />
+      {error ? <p className="mt-3 text-xs text-destructive">{error}</p> : null}
+    </section>
   );
 }
 

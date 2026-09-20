@@ -3834,20 +3834,6 @@ function StaffPage({
             </div>
           }
         />
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
-          <p className="text-xs font-semibold text-primary">Staff accounts</p>
-          <p className="mt-1 text-xs text-muted-foreground">Name, role, username, and temporary password.</p>
-        </div>
-        <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
-          <p className="text-xs font-semibold text-primary">Doctor accounts</p>
-          <p className="mt-1 text-xs text-muted-foreground">A patient-visible care availability status is included.</p>
-        </div>
-        <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
-          <p className="text-xs font-semibold text-primary">Administrator accounts</p>
-          <p className="mt-1 text-xs text-muted-foreground">Adds recovery and internal contact details for secure setup.</p>
-        </div>
-      </div>
       </div>
       <Panel
         title="Account directory"
@@ -4530,7 +4516,7 @@ function InventoryHistory({
 }
 function Head({
   title,
-  sub,
+  sub: _sub,
   action,
 }: {
   title: string;
@@ -4538,13 +4524,9 @@ function Head({
   action?: any;
 }) {
   return (
-    <div className="mb-6 flex flex-wrap justify-between gap-3">
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-border/70 pb-5">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[.15em] text-primary">
-          Administration
-        </p>
         <h2 className="font-display text-3xl font-bold">{title}</h2>
-        {sub && <p className="text-sm text-muted-foreground">{sub}</p>}
       </div>
       {action}
     </div>
