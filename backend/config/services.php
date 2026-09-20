@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'smartserve' => [
+        // Replace in each environment. It is shown only to staff at onsite
+        // registration and patients are forced to change it after first login.
+        'onsite_default_password' => env('SMARTSERVE_ONSITE_DEFAULT_PASSWORD'),
+    ],
+
 ];

@@ -201,7 +201,7 @@ function localQueueDisplay(): Plugin {
         }
         const port = request.headers.host?.match(/:(\d+)$/)?.[1] || "8080";
         const urls = lanIpv4Addresses().map(
-          (address) => `http://${address}:${port}/?display=queue-tv`,
+          (address) => `http://${address}:${port}/queue/general-clinic`,
         );
         sendJson(response, { urls });
       });
@@ -218,6 +218,12 @@ export default defineConfig(({ mode }) => ({
     allowedHosts: true,
     hmr: {
       overlay: false,
+    },
+    proxy: {
+      "/api/v1": {
+        target: process.env.VITE_LARAVEL_URL || "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
     },
   },
   plugins: [

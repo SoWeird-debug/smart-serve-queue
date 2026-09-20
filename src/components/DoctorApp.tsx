@@ -49,9 +49,9 @@ export function DoctorApp({ currentUser }: { currentUser?: StaffUser }) {
     staffUsers,
     updateStaffUser,
   } = usePrototypeStore();
-  const currentDoctor = currentUser
-    ? staffUsers.find((user) => user.id === currentUser.id)
-    : undefined;
+  // Use the authenticated Laravel account for its clinic assignment. The
+  // prototype staff list is no longer the authority for a signed-in doctor.
+  const currentDoctor = currentUser;
   const assignedCareArea: "General Clinic" | "Animal Bite Center" = currentDoctor?.assignedAreas?.includes("Animal Bite Center")
     ? "Animal Bite Center"
     : "General Clinic";

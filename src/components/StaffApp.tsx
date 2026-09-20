@@ -30,6 +30,23 @@ import { calculateAge } from "@/lib/patient-age";
 import { reverseGeocodePhilippineAddress } from "@/lib/location-address";
 import { appointmentPriority, orderDoctorQueue } from "@/lib/queue-priority";
 import {
+  ApiError,
+  apiServices,
+  type ApiQueueItem,
+  type ApiPatientSearchResult,
+  type ApiService,
+  type ApiStaffAppointment,
+  completeStaffTriage,
+  createStaffWalkIn,
+  registerOnsitePatient,
+  searchStaffPatients,
+  staffQueue,
+  staffCheckIn,
+  staffMarkAbsent,
+  staffScheduledAppointments,
+  startStaffTriage,
+} from "@/lib/api";
+import {
   barangaysForMunicipality,
   fetchPsgcBarangays,
   isabelaMunicipalities,
@@ -167,7 +184,9 @@ async function searchAddressCandidates(
 export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
   const [tab, setTab] = useState<FrontDeskTab>("checkin");
   const store = usePrototypeStore();
-  const staffUser = currentUser ? store.staffUsers.find((user) => user.id === currentUser.id) : undefined;
+  // Authentication now comes from Laravel. Do not look the signed-in staff
+  // account up in the old prototype collection.
+  const staffUser = currentUser;
   // A staff account has one clinic assignment. Legacy accounts tagged for Animal Bite
   // Center are routed there so their workspace never mixes general-clinic cases.
   const careArea: CareArea = staffUser?.assignedAreas?.includes("Animal Bite Center")
@@ -225,14 +244,7 @@ export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
             </div>
           </div>
           {tab === "checkin" && (
-            <Checkin
-              appts={store.appointments}
-              patients={store.patients}
-              services={store.services}
-              checkIn={store.checkIn}
-              markAbsent={store.markAbsent}
-              area={careArea}
-            />
+            <Checkin area={careArea} />
           )}
           {tab === "intake" && <FrontDeskIntake services={store.services} area={careArea} />}
           {tab === "queue" && (
@@ -397,6 +409,11 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
   });
   const [connection, setConnection] = useState("Connecting to the local SmartServe queue…");
   const area = forcedArea || (new URLSearchParams(window.location.search).get("area") === "animal-bite" ? "Animal Bite Center" : "General Clinic");
+  const isLocalBoard = import.meta.env.DEV;
+  const hostedEndpoint = area === "Animal Bite Center"
+    ? "/api/v1/public/queue-board/animal-bite"
+    : "/api/v1/public/queue-board/general-clinic";
+  const endpoint = isLocalBoard ? "/api/queue-display" : hostedEndpoint;
 
   useEffect(() => {
     const clock = window.setInterval(() => setNow(new Date()), 1000);
@@ -406,7 +423,7 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
     let active = true;
     const refresh = async () => {
       try {
-        const response = await fetch("/api/queue-display", {
+        const response = await fetch(endpoint, {
           headers: { Accept: "application/json" },
           cache: "no-store",
         });
@@ -422,12 +439,14 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
         });
         setConnection(
           state.updatedAt
-            ? `Live local queue · last staff update ${new Date(state.updatedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
-            : "Waiting for the staff queue workspace to publish the first update.",
+            ? `${isLocalBoard ? "Live local queue" : "Live queue"} · last update ${new Date(state.updatedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+            : "Waiting for the first queue update.",
         );
       } catch {
         if (active)
-          setConnection("Waiting for the local SmartServe server. Keep this TV on the same clinic network.");
+          setConnection(isLocalBoard
+            ? "Waiting for the local SmartServe server. Keep this TV on the same clinic network."
+            : "Waiting for the secure SmartServe queue service.");
       }
     };
     void refresh();
@@ -436,7 +455,7 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
       active = false;
       window.clearInterval(poll);
     };
-  }, []);
+  }, [endpoint, isLocalBoard]);
 
   return (
     <main className="min-h-screen bg-slate-950 p-3 md:p-6">
@@ -446,30 +465,35 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
   );
 }
 
-function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) {
+function Checkin({ area }: { area: CareArea }) {
   const [query, setQuery] = useState("");
+  const [scheduled, setScheduled] = useState<ApiStaffAppointment[]>([]);
+  const [loading, setLoading] = useState(true);
   const [confirmation, setConfirmation] = useState<{ name: string; queueNumber: string } | null>(null);
   const [error, setError] = useState("");
+  const careAreaId = area === "Animal Bite Center" ? 2 : 1;
+  const load = async () => {
+    setLoading(true);
+    try {
+      const result = await staffScheduledAppointments(careAreaId, query);
+      setScheduled(result.data);
+      setError("");
+    } catch (requestError) {
+      setError(requestError instanceof ApiError ? requestError.message : "Could not load today's scheduled appointments.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { void load(); }, [careAreaId]);
+  useEffect(() => {
+    const delay = window.setTimeout(() => void load(), 250);
+    return () => window.clearTimeout(delay);
+  }, [query, careAreaId]);
   useEffect(() => {
     if (!confirmation) return;
     const timeout = window.setTimeout(() => setConfirmation(null), 3000);
     return () => window.clearTimeout(timeout);
   }, [confirmation]);
-  const scheduled = appts.filter((appointment: Appointment) => {
-    const service = services.find(
-      (item: Service) => item.id === appointment.serviceId,
-    );
-    const patient = patients.find((item: Patient) => item.id === appointment.patientId);
-    const appointmentArea = service?.queueArea || appointment.queueArea || "General Clinic";
-    return (
-      appointment.visitType === "Scheduled" &&
-      appointment.queueStatus === "Scheduled" &&
-      appointmentArea === area &&
-      `${patient?.fullName || ""} ${patient?.patientNumber || ""} ${patient?.contact || ""}`
-        .toLowerCase()
-        .includes(query.trim().toLowerCase())
-    );
-  });
   return (
     <div className="mx-auto flex max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-card lg:h-[calc(100dvh-18rem)]">
       <div className="shrink-0 border-b border-border p-5">
@@ -498,35 +522,30 @@ function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) 
         {error && <p className="text-sm text-destructive mt-2">{error}</p>}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-      {scheduled.map((a: Appointment) => (
+      {scheduled.map((a) => (
         <div
           key={a.id}
           className="flex flex-col md:flex-row md:items-center gap-3 p-4 border-b border-border"
         >
           <span className="font-display font-bold text-primary w-16">
-            {a.queueNumber || "—"}
+            {a.time_slot || "—"}
           </span>
           <div className="flex-1">
-            <p className="font-semibold">{label(patients, a.patientId)}</p>
+            <p className="font-semibold">{a.family_name}, {a.given_name}</p>
             <p className="text-xs text-muted-foreground">
-              {services.find((s: Service) => s.id === a.serviceId)?.name} ·{" "}
-              {a.attendanceStatus}
+              {a.patient_number} · {a.service_name} · {a.mobile_number}
             </p>
           </div>
           <Button
             size="sm"
-            disabled={a.attendanceStatus === "Present"}
-            onClick={() => {
-              const assignedQueueNumber = checkIn(a.id);
-              if (!assignedQueueNumber) {
-                setError("All 100 queue numbers for this care area are currently in use.");
-                return;
+            onClick={async () => {
+              try {
+                const result = await staffCheckIn(a.id);
+                setConfirmation({ name: `${a.family_name}, ${a.given_name}`, queueNumber: String(result.data.active_queue_number).padStart(3, "0") });
+                await load();
+              } catch (requestError) {
+                setError(requestError instanceof ApiError ? requestError.message : "Could not check in this patient.");
               }
-              setError("");
-              setConfirmation({
-                name: label(patients, a.patientId),
-                queueNumber: assignedQueueNumber,
-              });
             }}
           >
             <UserCheck className="w-4 h-4 mr-1" />
@@ -535,14 +554,16 @@ function Checkin({ appts, patients, services, checkIn, markAbsent, area }: any) 
           <Button
             size="sm"
             variant="outline"
-            disabled={a.attendanceStatus === "Present"}
-            onClick={() => markAbsent(a.id)}
+            onClick={async () => {
+              try { await staffMarkAbsent(a.id); await load(); }
+              catch (requestError) { setError(requestError instanceof ApiError ? requestError.message : "Could not mark this appointment absent."); }
+            }}
           >
             Absent
           </Button>
         </div>
       ))}
-      {!scheduled.length ? (
+      {!loading && !scheduled.length ? (
         <p className="p-5 text-sm text-muted-foreground">
           No scheduled {area === "Animal Bite Center" ? "Animal Bite" : "General Clinic"} appointments are awaiting check-in.
         </p>
@@ -668,7 +689,6 @@ function RegistrationForm({
   onRegistered: (patientId: string) => void;
   onContinueToWalkIn: () => void;
 }) {
-  const { patients, registerPatient } = usePrototypeStore();
   const [form, setForm] = useState({
     givenName: "",
     familyName: "",
@@ -860,7 +880,7 @@ function RegistrationForm({
       "Address result selected. Review the pin with the patient and mark it verified.",
     );
   };
-  const submit = () => {
+  const submit = async () => {
     setRegistrationError("");
     if (
       !form.givenName ||
@@ -890,40 +910,18 @@ function RegistrationForm({
       );
       return;
     }
-    const existingPatient = patients.find((patient) => {
-      const philHealthMatches =
-        Boolean(form.philHealthPin) &&
-        normalizePatientIdentity(patient.philHealthPin || "") ===
-          normalizePatientIdentity(form.philHealthPin);
-      const nameAndBirthDateMatch =
-        normalizePatientIdentity(patient.fullName) ===
-          normalizePatientIdentity(fullName) && patient.dob === form.dob;
-      return philHealthMatches || nameAndBirthDateMatch;
-    });
-    if (existingPatient) {
-      setRegistrationError(
-        `A matching patient record already exists (${existingPatient.patientNumber || existingPatient.fullName}). Search for that patient and add the visit instead of creating a duplicate.`,
-      );
-      return;
+    try {
+      const result = await registerOnsitePatient({
+        given_name: form.givenName, family_name: form.familyName, middle_name: form.middleName || null, suffix: form.suffix || null,
+        date_of_birth: form.dob, sex: form.gender.toLowerCase(), mobile_number: form.contact, email: form.email || null,
+        barangay_name: form.barangay, municipality_name: form.municipality, address_line: form.addressLine,
+        latitude: pin.latitude, longitude: pin.longitude, consent_to_treatment: true, privacy_acknowledged: true,
+      });
+      onRegistered(String(result.data.id));
+      setRegistrationSuccess(`${fullName} was registered successfully. Portal sign-in: ${result.data.patient_number}. Temporary password: ${result.data.default_password}. Give these privately to the patient, then they can continue to walk-in.`);
+    } catch (requestError) {
+      setRegistrationError(requestError instanceof ApiError ? requestError.message : "Could not save this patient record.");
     }
-    const patient = registerPatient({
-      ...form,
-      gender: form.gender as Patient["gender"],
-      fullName,
-      address,
-      latitude: pin.latitude,
-      longitude: pin.longitude,
-      locationSource,
-      locationAccuracy: pin.accuracy,
-      locationVerified,
-      locationVerifiedAt: locationVerified
-        ? new Date().toISOString()
-        : undefined,
-    });
-    onRegistered(patient.id);
-    setRegistrationSuccess(
-      `${patient.fullName} was registered successfully. Portal sign-in: ${patient.patientNumber}. Temporary password: ${ONSITE_PATIENT_DEFAULT_PASSWORD}. Give these privately to the patient, then they can continue to walk-in.`,
-    );
   };
   const identityFields = [
     ["familyName", "Last / family name", true, "family-name"],
@@ -1439,34 +1437,30 @@ function WalkInForm({
   area: CareArea;
   initialPatientId?: string;
 }) {
-  const { patients, addWalkIn } = usePrototypeStore();
   const [query, setQuery] = useState("");
-  const [patientId, setPatientId] = useState("");
-  const [serviceId, setServiceId] = useState(() => services[0]?.id || "");
+  const [patient, setPatient] = useState<ApiPatientSearchResult | null>(null);
+  const [matches, setMatches] = useState<ApiPatientSearchResult[]>([]);
+  const [remoteServices, setRemoteServices] = useState<ApiService[]>([]);
+  const [serviceId, setServiceId] = useState("");
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
+  const careAreaId = area === "Animal Bite Center" ? 2 : 1;
   useEffect(() => {
-    if (!services.some((service) => service.id === serviceId)) {
-      setServiceId(services[0]?.id || "");
-    }
-  }, [services, serviceId]);
+    void apiServices().then((result) => {
+      const available = result.data.filter((item) => item.care_area === area);
+      setRemoteServices(available);
+      setServiceId((current) => current || String(available[0]?.id || ""));
+    }).catch(() => setMessage("Could not load clinic services."));
+  }, [area]);
   useEffect(() => {
-    const patient = patients.find((item) => item.id === initialPatientId);
-    if (!patient) return;
-    setPatientId(patient.id);
-    setQuery(`${patient.fullName} · ${patient.patientNumber || ""}`);
-  }, [initialPatientId, patients]);
-  const matches = useMemo(
-    () =>
-      patients
-        .filter((p) =>
-          `${p.fullName} ${p.patientNumber || ""} ${p.contact} ${p.dob}`
-            .toLowerCase()
-            .includes(query.toLowerCase()),
-        )
-        .slice(0, 6),
-    [patients, query],
-  );
+    if (query.trim().length < 2 || patient) { setMatches([]); return; }
+    const timer = window.setTimeout(() => {
+      void searchStaffPatients(careAreaId, query)
+        .then((result) => setMatches(result.data))
+        .catch(() => setMatches([]));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [query, careAreaId, patient]);
   return (
     <section className="bg-card border border-border rounded-2xl p-5 shadow-soft">
       <h3 className="font-display font-bold text-lg">
@@ -1484,7 +1478,7 @@ function WalkInForm({
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
-          setPatientId("");
+          setPatient(null);
         }}
         placeholder="Search existing patient"
         className="mt-1"
@@ -1495,17 +1489,17 @@ function WalkInForm({
             <button
               key={p.id}
               onClick={() => {
-                setPatientId(p.id);
-                setQuery(`${p.fullName} · ${p.patientNumber || ""}`);
+                setPatient(p);
+                setQuery(`${p.family_name}, ${p.given_name} · ${p.patient_number}`);
               }}
               className={cn(
                 "w-full text-left p-3 border-b border-border last:border-0",
-                patientId === p.id && "bg-primary-soft",
+                patient?.id === p.id && "bg-primary-soft",
               )}
             >
-              <p className="font-medium text-sm">{p.fullName}</p>
+              <p className="font-medium text-sm">{p.family_name}, {p.given_name}</p>
               <p className="text-xs text-muted-foreground">
-                {p.patientNumber || "Existing patient"} · {p.dob} · {p.barangay}
+                {p.patient_number} · {p.date_of_birth} · {p.barangay_name || "Address not recorded"}
               </p>
             </button>
           ))}
@@ -1524,7 +1518,7 @@ function WalkInForm({
             onChange={(e) => setServiceId(e.target.value)}
             className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
           >
-            {services.map((s) => (
+            {remoteServices.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
@@ -1542,17 +1536,16 @@ function WalkInForm({
         />
       </div>
       <Button
-        disabled={!patientId || !serviceId || !reason}
-        onClick={() =>
-          (() => {
-            const assignedQueueNumber = addWalkIn(patientId, serviceId, reason, area);
-            setMessage(
-              assignedQueueNumber
-                ? `${area === "Animal Bite Center" ? "Animal Bite" : "Walk-in"} visit saved with queue number ${assignedQueueNumber}. Patient is now waiting for triage.`
-                : "All 100 queue numbers for this care area are currently in use.",
-            );
-          })()
-        }
+        disabled={!patient || !serviceId || !reason}
+        onClick={async () => {
+          try {
+            const result = await createStaffWalkIn({ patient_lookup: patient.patient_number, service_id: Number(serviceId), visit_reason: reason });
+            setMessage(`${area === "Animal Bite Center" ? "Animal Bite" : "Walk-in"} visit saved with queue number ${String(result.data.active_queue_number).padStart(3, "0")}. Patient is now waiting for triage.`);
+            setPatient(null); setQuery(""); setReason("");
+          } catch (requestError) {
+            setMessage(requestError instanceof ApiError ? requestError.message : "Could not add this walk-in.");
+          }
+        }}
         className="mt-5"
       >
         <Users className="w-4 h-4 mr-2" />
@@ -1573,13 +1566,21 @@ function WalkInForm({
 }
 
 function TriageForm({ area }: { area: CareArea }) {
-  const { appointments, patients, startTriage, completeTriage } = usePrototypeStore();
-  const waiting = appointments.filter(
-    (a) => a.queueStatus === "Waiting for Triage" && (a.queueArea || "General Clinic") === area,
-  );
-  const active = appointments.find(
-    (a) => a.queueStatus === "Triage" && (a.queueArea || "General Clinic") === area,
-  );
+  const [queue, setQueue] = useState<ApiQueueItem[]>([]);
+  const [apiError, setApiError] = useState("");
+  const careAreaId = area === "Animal Bite Center" ? 2 : 1;
+  const refreshQueue = async () => {
+    try {
+      const result = await staffQueue(careAreaId);
+      setQueue(result.data);
+      setApiError("");
+    } catch (requestError) {
+      setApiError(requestError instanceof ApiError ? requestError.message : "Could not load the triage queue.");
+    }
+  };
+  useEffect(() => { void refreshQueue(); }, [careAreaId]);
+  const waiting = queue.filter((item) => item.status === "waiting_for_triage");
+  const active = queue.find((item) => item.status === "triage");
   const eligible = active ? [active, ...waiting] : waiting;
   const [id, setId] = useState("");
   const [priority, setPriority] = useState<
@@ -1600,8 +1601,8 @@ function TriageForm({ area }: { area: CareArea }) {
     firstAid: "",
   });
   useEffect(() => {
-    if (active) setId(active.id);
-    else if (!eligible.some((a) => a.id === id)) setId(eligible[0]?.id || "");
+    if (active) setId(String(active.appointment_id));
+    else if (!eligible.some((a) => String(a.appointment_id) === id)) setId(String(eligible[0]?.appointment_id || ""));
   }, [active, eligible, id]);
   const isAnimalBite = area === "Animal Bite Center";
   const animalAssessmentComplete = !isAnimalBite || Boolean(
@@ -1633,9 +1634,8 @@ function TriageForm({ area }: { area: CareArea }) {
           >
             <option value="">Select patient</option>
             {eligible.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.queueNumber} · {label(patients, a.patientId)} ·{" "}
-                {a.visitType || "Scheduled"}
+              <option key={a.id} value={a.appointment_id}>
+                {String(a.queue_number).padStart(3, "0")} · {a.family_name}, {a.given_name} · {a.visit_type || "Scheduled"}
               </option>
             ))}
           </select>
@@ -1674,9 +1674,12 @@ function TriageForm({ area }: { area: CareArea }) {
       <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-primary/15 bg-primary-soft/50 p-3">
         <div className="flex-1 text-sm">
           <p className="font-semibold">Nurse / triage service status</p>
-          <p className="text-xs text-muted-foreground">{active ? `Queue ${active.queueNumber} is currently being assessed.` : "Select a waiting patient, then start the assessment to show the number on the public queue board."}</p>
+          <p className="text-xs text-muted-foreground">{active ? `Queue ${String(active.queue_number).padStart(3, "0")} is currently being assessed.` : "Select a waiting patient, then start the assessment to show the number on the public queue board."}</p>
         </div>
-        <Button type="button" variant="outline" disabled={!id || Boolean(active)} onClick={() => { if (startTriage(id)) return; }}>
+        <Button type="button" variant="outline" disabled={!id || Boolean(active)} onClick={async () => {
+          try { await startStaffTriage(Number(id)); await refreshQueue(); }
+          catch (requestError) { setApiError(requestError instanceof ApiError ? requestError.message : "Could not start this assessment."); }
+        }}>
           Start assessment
         </Button>
       </div>
@@ -1703,24 +1706,31 @@ function TriageForm({ area }: { area: CareArea }) {
         </div>
       ) : null}
       <Button
-        disabled={!id || !active || active.id !== id || !animalAssessmentComplete}
-        onClick={() => {
-          const completed = completeTriage({ appointmentId: id, priority, ...f, ...(isAnimalBite ? { animalExposure } : {}) });
-          if (!completed) return;
-          setF({
-            bloodPressure: "",
-            temperature: "",
-            pulseRespiratory: "",
-            allergies: "",
-            complaint: "",
-          });
-          setAnimalExposure({ animal: "Dog", exposure: "Bite", woundSite: "", animalStatus: "Unknown", firstAid: "" });
+        disabled={!id || !active || active.appointment_id !== Number(id) || !animalAssessmentComplete}
+        onClick={async () => {
+          try {
+            await completeStaffTriage(Number(id), {
+              priority: priority.toLowerCase(),
+              blood_pressure: f.bloodPressure,
+              temperature: f.temperature,
+              pulse_respiratory: f.pulseRespiratory,
+              allergies: f.allergies,
+              chief_complaint: f.complaint,
+              ...(isAnimalBite ? { animal_exposure: animalExposure } : {}),
+            });
+            setF({ bloodPressure: "", temperature: "", pulseRespiratory: "", allergies: "", complaint: "" });
+            setAnimalExposure({ animal: "Dog", exposure: "Bite", woundSite: "", animalStatus: "Unknown", firstAid: "" });
+            await refreshQueue();
+          } catch (requestError) {
+            setApiError(requestError instanceof ApiError ? requestError.message : "Could not complete triage.");
+          }
         }}
         className="mt-5"
       >
         <ClipboardPlus className="w-4 h-4 mr-2" />
         {isAnimalBite ? "Complete bite assessment & send to doctor" : "Complete triage & send to doctor"}
       </Button>
+      {apiError ? <p className="mt-3 text-sm text-destructive">{apiError}</p> : null}
     </section>
   );
 }

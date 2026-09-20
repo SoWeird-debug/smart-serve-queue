@@ -22,7 +22,7 @@ const workspaceForRole = (role: StaffUser["role"]): Workspace => {
 
 const Index = () => {
   const displayMode = new URLSearchParams(window.location.search).get("display");
-  const isAnimalBiteQueueDisplay = window.location.pathname === "/animal-bite-queue";
+  const queueBoardPath = window.location.pathname.replace(/\/+$/, "") || "/";
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [signedInUser, setSignedInUser] = useState<StaffUser | null>(null);
   const enterStaffWorkspace = (user: StaffUser) => {
@@ -34,7 +34,10 @@ const Index = () => {
     setWorkspace(null);
   };
 
-  if (isAnimalBiteQueueDisplay) return <QueueTvDisplay area="Animal Bite Center" />;
+  if (queueBoardPath === "/queue/animal-bite" || queueBoardPath === "/animal-bite-queue") {
+    return <QueueTvDisplay area="Animal Bite Center" />;
+  }
+  if (queueBoardPath === "/queue/general-clinic") return <QueueTvDisplay area="General Clinic" />;
   if (displayMode === "queue-tv") return <QueueTvDisplay />;
 
   if (!workspace) {

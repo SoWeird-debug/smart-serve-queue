@@ -11,6 +11,10 @@ class StaffAuthApiTest extends TestCase
 
     public function test_first_administrator_setup_and_staff_login_are_database_backed(): void
     {
+        $this->getJson('/api/v1/staff-auth/setup-status')
+            ->assertOk()
+            ->assertJsonPath('setup_required', true);
+
         $this->postJson('/api/v1/staff-auth/setup-administrator', [
             'name' => 'Clinic Administrator',
             'username' => 'admin',
@@ -28,5 +32,9 @@ class StaffAuthApiTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('user.username', 'admin');
+
+        $this->getJson('/api/v1/staff-auth/setup-status')
+            ->assertOk()
+            ->assertJsonPath('setup_required', false);
     }
 }

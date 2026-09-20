@@ -46,7 +46,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { helpers, type Patient, type Service } from "@/data/mockData";
+import { helpers, services as seedServices, type Patient, type Service } from "@/data/mockData";
 import {
   LocationPickerMap,
   type PinnedLocation,
@@ -60,6 +60,19 @@ import {
   reverseGeocodePhilippineAddress,
   type DetectedPhilippineAddress,
 } from "@/lib/location-address";
+import {
+  ApiError,
+  type ApiAppointment,
+  type ApiPatient,
+  apiBarangays,
+  apiMunicipalities,
+  apiServices,
+  createPatientAppointment,
+  patientLogin,
+  patientAppointments,
+  patientRegister,
+  setApiAccessToken,
+} from "@/lib/api";
 
 const iconMap = {
   Stethoscope,
@@ -70,8 +83,6 @@ const iconMap = {
   TestTube,
   ShieldPlus,
 };
-const rememberedSessionKey = "smartserve-patient-remembered-session";
-const rememberedMobileKey = "smartserve-patient-remembered-mobile";
 // The browser reports geolocation accuracy in metres. A one-kilometre
 // fallback keeps rural users with weak GPS coverage from being blocked.
 const MAX_SERVICE_LOCATION_ACCURACY_METERS = 1_000;
@@ -89,6 +100,62 @@ const isSupportedServiceArea = (area: {
   );
 };
 
+const patientFromApi = (patient: ApiPatient): Patient => {
+  const address = patient.address;
+  const fullName = [patient.given_name, patient.middle_name, patient.family_name, patient.suffix].filter(Boolean).join(" ");
+  return {
+    id: String(patient.id),
+    patientNumber: patient.patient_number,
+    fullName,
+    maskedName: `${patient.given_name.slice(0, 1)}. ${patient.family_name}`,
+    dob: patient.date_of_birth,
+    gender: patient.sex === "male" ? "Male" : patient.sex === "female" ? "Female" : "Other",
+    contact: patient.mobile_number,
+    alternateContact: patient.alternate_contact || undefined,
+    email: patient.email || undefined,
+    emailVerifiedAt: patient.email_verified_at || undefined,
+    familyName: patient.family_name,
+    givenName: patient.given_name,
+    middleName: patient.middle_name || undefined,
+    suffix: patient.suffix || undefined,
+    civilStatus: patient.civil_status || undefined,
+    nationality: patient.nationality || undefined,
+    preferredLanguage: patient.preferred_language || undefined,
+    guardianName: patient.guardian_name || undefined,
+    guardianRelationship: patient.guardian_relationship || undefined,
+    guardianContact: patient.guardian_contact || undefined,
+    emergencyContactName: patient.emergency_contact_name || undefined,
+    emergencyContactRelationship: patient.emergency_contact_relationship || undefined,
+    emergencyContactPhone: patient.emergency_contact_phone || undefined,
+    address: address?.address_line || "",
+    addressLine: address?.address_line || "",
+    barangay: address?.barangay_name || "",
+    municipality: address?.municipality_name || "",
+    province: address?.province_name || "Isabela",
+    postalCode: address?.postal_code || undefined,
+    latitude: address?.latitude || 0,
+    longitude: address?.longitude || 0,
+    locationAccuracy: address?.location_accuracy_meters || undefined,
+    locationSource: (address?.location_source as Patient["locationSource"]) || "Barangay fallback",
+    locationVerified: Boolean(address?.location_verified_at),
+    locationVerifiedAt: address?.location_verified_at || undefined,
+    requiresInitialServiceLocation: !address?.location_verified_at,
+    consentToTreatment: true,
+    privacyAcknowledged: true,
+  };
+};
+
+const serviceFromApi = (service: Awaited<ReturnType<typeof apiServices>>["data"][number]): Service => {
+  const known = seedServices.find((item: Service) => item.name === service.name);
+  return {
+    id: String(service.id), name: service.name, description: service.description || "",
+    duration: service.duration_minutes, capacity: service.daily_capacity,
+    icon: known?.icon || "Stethoscope", color: known?.color || "primary",
+    queueArea: service.care_area === "Animal Bite Center" ? "Animal Bite Center" : "General Clinic",
+    followUpEligible: service.follow_up_eligible, building: service.building || undefined,
+  };
+};
+
 type Screen =
   | "login"
   | "register"
@@ -103,12 +170,11 @@ type Screen =
   | "profile";
 
 export function PatientApp() {
-  const [patientId, setPatientId] = useState<string | null>(() =>
-    localStorage.getItem(rememberedSessionKey),
-  );
-  const [screen, setScreen] = useState<Screen>(() =>
-    localStorage.getItem(rememberedSessionKey) ? "home" : "login",
-  );
+  const [patientId, setPatientId] = useState<string | null>(null);
+  const [remotePatient, setRemotePatient] = useState<Patient | null>(null);
+  const [remoteServices, setRemoteServices] = useState<Service[]>([]);
+  const [remoteAppointments, setRemoteAppointments] = useState<ApiAppointment[]>([]);
+  const [screen, setScreen] = useState<Screen>("login");
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<number>(
     new Date().getDate() + 1,
@@ -128,11 +194,19 @@ export function PatientApp() {
     notifications,
     markNotificationRead,
   } = usePrototypeStore();
-  const me = patients.find((patient) => patient.id === patientId) || null;
+  const servicesForUi = remoteServices.length ? remoteServices : services;
+  const me = remotePatient || patients.find((patient) => patient.id === patientId) || null;
+  const refreshAppointments = async () => {
+    const { data } = await patientAppointments();
+    setRemoteAppointments(data);
+  };
+  useEffect(() => {
+    void apiServices().then((result) => setRemoteServices(result.data.map(serviceFromApi))).catch(() => undefined);
+  }, []);
   useEffect(() => {
     if (patientId && !me) {
-      localStorage.removeItem(rememberedSessionKey);
       setPatientId(null);
+      setRemotePatient(null);
       setScreen("login");
     }
   }, [me, patientId]);
@@ -141,16 +215,18 @@ export function PatientApp() {
       setSecuritySetupPatientId(patientId);
     }
   }, [patientId, needsPatientPasswordChange]);
-  const authenticate = (id: string, remember: boolean) => {
-    if (remember) localStorage.setItem(rememberedSessionKey, id);
-    else localStorage.removeItem(rememberedSessionKey);
-    setPatientId(id);
+  const authenticate = (patient: Patient) => {
+    setPatientId(patient.id);
+    setRemotePatient(patient);
     setScreen("home");
-    setSecuritySetupPatientId(needsPatientPasswordChange(id) ? id : null);
+    setSecuritySetupPatientId(null);
+    void refreshAppointments().catch(() => setRemoteAppointments([]));
   };
   const signOut = () => {
-    localStorage.removeItem(rememberedSessionKey);
+    setApiAccessToken(null);
     setPatientId(null);
+    setRemotePatient(null);
+    setRemoteAppointments([]);
     setScreen("login");
   };
   const openServices = () => setScreen("services");
@@ -182,14 +258,11 @@ export function PatientApp() {
           {screen === "login" && (
             <LoginScreen
               onAuthenticated={authenticate}
-              register={registerPortalPatient}
-              login={loginPatient}
               onStartRegistration={() => setScreen("register")}
             />
           )}
           {screen === "register" && (
             <OnlineRegistrationWizard
-              register={registerPortalPatient}
               onAuthenticated={authenticate}
               onBack={() => setScreen("login")}
             />
@@ -205,7 +278,7 @@ export function PatientApp() {
           {screen === "home" && me && (
             <HomeScreen
               me={me}
-              services={services}
+              services={servicesForUi}
               onBook={openServices}
               onView={() => setScreen("myAppts")}
               onNotif={() => setScreen("notif")}
@@ -213,7 +286,7 @@ export function PatientApp() {
           )}
           {screen === "services" && (
             <ServicesScreen
-              services={services}
+              services={servicesForUi}
               onBack={() => setScreen("home")}
               onPick={(id) => {
                 setSelectedService(id);
@@ -227,7 +300,7 @@ export function PatientApp() {
           )}
           {screen === "schedule" && me && (
             <ScheduleScreen
-              services={services}
+              services={servicesForUi}
               patient={me}
               serviceId={selectedService!}
               date={selectedDate}
@@ -238,14 +311,13 @@ export function PatientApp() {
           )}
           {screen === "confirm" && me && (
             <ConfirmScreen
-              services={services}
+              services={servicesForUi}
               serviceId={selectedService!}
               date={selectedDate}
               patient={me}
               onDone={() => {
-                bookAppointment(
-                  me.id,
-                  selectedService!,
+                void createPatientAppointment(
+                  Number(selectedService!),
                   new Date(
                     new Date().getFullYear(),
                     new Date().getMonth(),
@@ -253,15 +325,15 @@ export function PatientApp() {
                   )
                     .toISOString()
                     .slice(0, 10),
-                );
-                setScreen("myAppts");
+                ).then(() => refreshAppointments()).then(() => setScreen("myAppts"));
               }}
             />
           )}
           {screen === "myAppts" && me && (
             <MyAppointmentsScreen
-              services={services}
+              services={servicesForUi}
               patientId={me.id}
+              remoteAppointments={remoteAppointments}
               onBack={() => setScreen("home")}
             />
           )}
@@ -442,13 +514,9 @@ function FirstLoginSecurityDialog({
 
 function LoginScreen({
   onAuthenticated,
-  register,
-  login,
   onStartRegistration,
 }: {
-  onAuthenticated: (id: string, remember: boolean) => void;
-  register: any;
-  login: any;
+  onAuthenticated: (patient: Patient) => void;
   onStartRegistration: () => void;
 }) {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -456,7 +524,7 @@ function LoginScreen({
     fullName: "",
     dob: "",
     gender: "Female" as "Female" | "Male",
-    mobile: localStorage.getItem(rememberedMobileKey) || "",
+    mobile: "",
     barangay: "",
     municipality: "",
     postalCode: "",
@@ -470,9 +538,7 @@ function LoginScreen({
   >("Patient-selected pin");
   const [locationConfirmed, setLocationConfirmed] = useState(false);
   const [locationDetailsStatus, setLocationDetailsStatus] = useState("");
-  const [remember, setRemember] = useState(() =>
-    Boolean(localStorage.getItem(rememberedMobileKey)),
-  );
+  const [remember, setRemember] = useState(false);
   const [error, setError] = useState("");
   const age = calculateAge(form.dob);
   const fillDetectedLocationDetails = async (location: PinnedLocation) => {
@@ -504,60 +570,19 @@ function LoginScreen({
       );
     }
   };
-  const submit = () => {
+  const submit = async () => {
     if (mode === "login") {
-      const patient = login(form.mobile, form.password);
-      if (!patient)
-        return setError(
-          "Patient number or mobile number, or password, is incorrect.",
-        );
-      if (remember)
-        localStorage.setItem(rememberedMobileKey, form.mobile.trim());
-      else localStorage.removeItem(rememberedMobileKey);
-      onAuthenticated(patient.id, remember);
+      try {
+        const result = await patientLogin(form.mobile, form.password);
+        setApiAccessToken(result.token);
+        onAuthenticated(patientFromApi(result.patient));
+        setError("");
+      } catch (requestError) {
+        setError(requestError instanceof ApiError ? requestError.message : "Patient sign-in could not reach the SmartServe server.");
+      }
       return;
     }
-    if (
-      !form.fullName ||
-      !form.dob ||
-      !form.mobile ||
-      !form.barangay ||
-      !form.municipality ||
-      !form.postalCode ||
-      form.password.length < 4
-    )
-      return setError(
-        "Complete the required details and use a password with at least 4 characters.",
-      );
-    const patient = register(
-      {
-        fullName: form.fullName,
-        dob: form.dob,
-        gender: form.gender as Patient["gender"],
-        contact: form.mobile,
-        barangay: form.barangay,
-        municipality: form.municipality,
-        postalCode: form.postalCode,
-        address: form.address || form.barangay,
-        latitude: registrationLocation?.latitude,
-        longitude: registrationLocation?.longitude,
-        locationAccuracy: registrationLocation?.accuracy,
-        locationSource: registrationLocation
-          ? registrationLocationSource
-          : "Barangay fallback",
-        locationVerified: Boolean(registrationLocation && locationConfirmed),
-        locationVerifiedAt:
-          registrationLocation && locationConfirmed
-            ? new Date().toISOString()
-            : undefined,
-      },
-      form.password,
-    );
-    if (!patient)
-      return setError(
-        "That mobile number already has an account on this device.",
-      );
-    onAuthenticated(patient.id, false);
+    onStartRegistration();
   };
   return (
     <div className="min-h-full p-6 pt-12 text-primary-foreground flex flex-col">
@@ -845,12 +870,10 @@ function PortalInput({
 }
 
 function OnlineRegistrationWizard({
-  register,
   onAuthenticated,
   onBack,
 }: {
-  register: any;
-  onAuthenticated: (id: string, remember: boolean) => void;
+  onAuthenticated: (patient: Patient) => void;
   onBack: () => void;
 }) {
   const [step, setStep] = useState<OnlineRegistrationStep>(1);
@@ -958,10 +981,11 @@ function OnlineRegistrationWizard({
     if (step === 4) {
       if (
         !form.privacyAcknowledged ||
+        !form.email ||
         !form.consentToTreatment ||
-        form.password.length < 4
+        form.password.length < 8
       )
-        return "Create a password, acknowledge the Privacy Notice, and confirm consent to treatment.";
+        return "Enter an email, create a password of at least 8 characters, acknowledge the Privacy Notice, and confirm consent to treatment.";
     }
     return "";
   };
@@ -974,57 +998,38 @@ function OnlineRegistrationWizard({
     setError("");
     setStep((current) => Math.min(4, current + 1) as OnlineRegistrationStep);
   };
-  const submit = () => {
+  const submit = async () => {
     const problem = stepProblem();
     if (problem) {
       setError(problem);
       return;
     }
-    const patient = register(
-      {
-        fullName,
-        givenName: form.givenName,
-        familyName: form.familyName,
-        middleName: form.middleName,
-        suffix: form.suffix,
-        dob: form.dob,
-        gender: form.gender,
-        civilStatus: form.civilStatus,
-        nationality: form.nationality,
-        preferredLanguage: form.preferredLanguage,
-        contact: form.mobile,
-        alternateContact: form.alternateContact,
-        email: form.email,
-        address,
-        addressLine: form.addressLine,
-        barangay: form.barangay,
-        municipality: form.municipality,
-        province: form.province,
-        postalCode: form.postalCode,
-        philHealthClientType: form.philHealthClientType,
-        philHealthPin: form.philHealthPin,
-        philHealthMemberName: form.philHealthMemberName,
-        philHealthMemberPin: form.philHealthMemberPin,
-        guardianName: form.guardianName,
-        guardianRelationship: form.guardianRelationship,
-        guardianContact: form.guardianContact,
-        emergencyContactName: form.emergencyContactName,
-        emergencyContactRelationship: form.emergencyContactRelationship,
-        emergencyContactPhone: form.emergencyContactPhone,
-        locationSource: "Barangay fallback",
-        locationVerified: false,
-        consentToTreatment: form.consentToTreatment,
-        privacyAcknowledged: form.privacyAcknowledged,
-      },
-      form.password,
-    );
-    if (!patient) {
-      setError(
-        "This mobile number already has a portal account. Sign in instead.",
-      );
-      return;
+    try {
+      const municipalities = await apiMunicipalities();
+      const municipality = municipalities.data.find((item) => item.name === form.municipality);
+      if (!municipality) throw new ApiError("Selected municipality is not available in the clinic directory.", 422);
+      const barangays = await apiBarangays(municipality.id);
+      const barangay = barangays.data.find((item) => item.name === form.barangay);
+      if (!barangay) throw new ApiError("Selected barangay is not available for this municipality.", 422);
+      const result = await patientRegister({
+        given_name: form.givenName, family_name: form.familyName, middle_name: form.middleName || null,
+        suffix: form.suffix || null, date_of_birth: form.dob, sex: form.gender.toLowerCase(),
+        civil_status: form.civilStatus || null, nationality: form.nationality || null,
+        preferred_language: form.preferredLanguage || null, mobile_number: form.mobile,
+        alternate_contact: form.alternateContact || null, email: form.email, password: form.password,
+        password_confirmation: form.password, barangay_id: barangay.id, address_line: form.addressLine,
+        consent_to_treatment: form.consentToTreatment, privacy_acknowledged: form.privacyAcknowledged,
+        philhealth_client_type: form.philHealthClientType, philhealth_pin: form.philHealthPin || null,
+        philhealth_member_name: form.philHealthMemberName || null, philhealth_member_pin: form.philHealthMemberPin || null,
+        guardian_name: form.guardianName || null, guardian_relationship: form.guardianRelationship || null,
+        guardian_contact: form.guardianContact || null, emergency_contact_name: form.emergencyContactName || null,
+        emergency_contact_relationship: form.emergencyContactRelationship || null, emergency_contact_phone: form.emergencyContactPhone || null,
+      });
+      setApiAccessToken(result.token);
+      onAuthenticated(patientFromApi(result.patient));
+    } catch (requestError) {
+      setError(requestError instanceof ApiError ? requestError.message : "Registration could not be saved to the SmartServe server.");
     }
-    onAuthenticated(patient.id, false);
   };
   const steps = [
     ["Identity", "Your legal patient details"],
@@ -2090,12 +2095,36 @@ function MyAppointmentsScreen({
   services,
   onBack,
   patientId,
+  remoteAppointments,
 }: {
   services: Service[];
   onBack: () => void;
   patientId: string;
+  remoteAppointments: ApiAppointment[];
 }) {
   const { appointments } = usePrototypeStore();
+  if (remoteAppointments.length) {
+    return (
+      <div>
+        <ScreenHeader title="My appointments" onBack={onBack} />
+        <div className="p-5 space-y-3">
+          {remoteAppointments.slice(0, 5).map((appointment) => (
+            <div key={appointment.id} className="bg-card border border-border rounded-2xl p-4 shadow-soft">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-display font-bold text-primary">APT-{String(appointment.id).padStart(6, "0")}</span>
+                <Badge className="border-0 bg-primary-soft text-primary">{appointment.status.replaceAll("_", " ")}</Badge>
+              </div>
+              <p className="font-semibold text-sm">{appointment.service_name}</p>
+              <p className="text-xs text-muted-foreground">{helpers.formatDate(appointment.appointment_date)} · {appointment.visit_type.replaceAll("_", " ")}</p>
+              <p className="mt-1 text-xs font-medium text-primary">{appointment.care_area} · {appointment.building || "Super Health Center"}</p>
+              <p className="mt-2 text-xs text-muted-foreground">Attendance: {appointment.attendance_status}</p>
+            </div>
+          ))}
+          {!remoteAppointments.length ? <p className="text-center text-xs text-muted-foreground">No appointments found.</p> : null}
+        </div>
+      </div>
+    );
+  }
   const list = appointments
     .filter((a) => a.patientId === patientId)
     .slice(0, 5);

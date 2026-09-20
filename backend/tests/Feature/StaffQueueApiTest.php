@@ -53,6 +53,77 @@ class StaffQueueApiTest extends TestCase
             ->assertJsonPath('data.source_visit_type', 'walk_in');
     }
 
+    public function test_front_desk_can_list_today_scheduled_patients_and_mark_one_absent(): void
+    {
+        $ids = $this->referenceIds();
+        $staff = User::factory()->create([
+            'role' => 'front_desk', 'is_active' => true,
+            'assigned_care_areas' => [$ids['care_area_id']],
+        ]);
+        Sanctum::actingAs($staff, ['front_desk']);
+        $appointmentId = $this->createScheduledAppointment($ids);
+
+        $this->getJson("/api/v1/staff/appointments/scheduled?care_area_id={$ids['care_area_id']}")
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $appointmentId)
+            ->assertJsonPath('data.0.patient_number', 'PT-000001');
+
+        $this->postJson("/api/v1/staff/appointments/{$appointmentId}/absent")
+            ->assertOk();
+
+        $this->assertDatabaseHas('appointments', [
+            'id' => $appointmentId, 'attendance_status' => 'absent', 'status' => 'no_show',
+        ]);
+    }
+
+    public function test_nurse_can_complete_triage_and_send_patient_to_doctor_queue(): void
+    {
+        $ids = $this->referenceIds();
+        $frontDesk = User::factory()->create([
+            'role' => 'front_desk', 'is_active' => true,
+            'assigned_care_areas' => [$ids['care_area_id']],
+        ]);
+        $appointmentId = $this->createScheduledAppointment($ids);
+        Sanctum::actingAs($frontDesk, ['front_desk']);
+        $this->postJson("/api/v1/staff/appointments/{$appointmentId}/check-in")->assertCreated();
+
+        $nurse = User::factory()->create([
+            'role' => 'nurse_triage', 'is_active' => true,
+            'assigned_care_areas' => [$ids['care_area_id']],
+        ]);
+        Sanctum::actingAs($nurse, ['nurse_triage']);
+        $this->postJson("/api/v1/staff/appointments/{$appointmentId}/triage/start")->assertOk();
+        $this->postJson("/api/v1/staff/appointments/{$appointmentId}/triage/complete", [
+            'blood_pressure' => '120/80',
+            'temperature' => '36.7',
+            'priority' => 'priority',
+        ])->assertOk()->assertJsonPath('data.priority', 'priority');
+
+        $this->assertDatabaseHas('appointments', ['id' => $appointmentId, 'status' => 'waiting_for_doctor']);
+        $this->assertDatabaseHas('queue_tickets', ['appointment_id' => $appointmentId, 'priority' => 'priority']);
+    }
+
+    public function test_doctor_completion_releases_the_active_queue_number(): void
+    {
+        $ids = $this->referenceIds();
+        $frontDesk = User::factory()->create(['role' => 'front_desk', 'is_active' => true, 'assigned_care_areas' => [$ids['care_area_id']]]);
+        $appointmentId = $this->createScheduledAppointment($ids);
+        Sanctum::actingAs($frontDesk, ['front_desk']);
+        $this->postJson("/api/v1/staff/appointments/{$appointmentId}/check-in")->assertCreated();
+        $nurse = User::factory()->create(['role' => 'nurse_triage', 'is_active' => true, 'assigned_care_areas' => [$ids['care_area_id']]]);
+        Sanctum::actingAs($nurse, ['nurse_triage']);
+        $this->postJson("/api/v1/staff/appointments/{$appointmentId}/triage/complete", ['priority' => 'normal'])->assertOk();
+        $doctor = User::factory()->create(['role' => 'doctor', 'is_active' => true, 'assigned_care_areas' => [$ids['care_area_id']]]);
+        Sanctum::actingAs($doctor, ['doctor']);
+        $this->postJson("/api/v1/staff/appointments/{$appointmentId}/doctor/call")->assertOk();
+        $this->postJson("/api/v1/staff/appointments/{$appointmentId}/doctor/complete", [
+            'diagnosis' => 'Clinical assessment complete',
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('appointments', ['id' => $appointmentId, 'status' => 'completed']);
+        $this->assertDatabaseHas('queue_tickets', ['appointment_id' => $appointmentId, 'active_queue_number' => null]);
+    }
+
     private function referenceIds(): array
     {
         $provinceId = \DB::table('provinces')->insertGetId(['name' => 'Isabela', 'created_at' => now(), 'updated_at' => now()]);

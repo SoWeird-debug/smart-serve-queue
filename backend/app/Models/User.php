@@ -29,6 +29,7 @@ class User extends Authenticatable
         'is_active',
         'must_change_password',
         'assigned_care_areas',
+        'doctor_availability',
     ];
 
     /**

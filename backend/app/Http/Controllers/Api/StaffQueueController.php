@@ -7,6 +7,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use App\Models\PatientProfile;
+use App\Models\User;
 
 class StaffQueueController extends Controller
 {
@@ -67,6 +69,120 @@ class StaffQueueController extends Controller
         });
 
         return response()->json(['data' => $ticket], 201);
+    }
+
+    public function scheduled(Request $request): JsonResponse
+    {
+        $this->requireStaff($request, ['front_desk', 'administrator']);
+        $data = $request->validate([
+            'care_area_id' => ['required', 'integer', 'exists:care_areas,id'],
+            'search' => ['nullable', 'string', 'max:100'],
+        ]);
+        $this->assertCareAreaAccess($request, (int) $data['care_area_id']);
+
+        $query = DB::table('appointments')
+            ->join('patient_profiles', 'patient_profiles.id', '=', 'appointments.patient_profile_id')
+            ->join('services', 'services.id', '=', 'appointments.service_id')
+            ->where('appointments.care_area_id', $data['care_area_id'])
+            ->whereDate('appointments.appointment_date', today())
+            ->where('appointments.status', 'scheduled');
+
+        if (! empty($data['search'])) {
+            $needle = '%'.$data['search'].'%';
+            $query->where(function ($search) use ($needle): void {
+                $search->where('patient_profiles.patient_number', 'like', $needle)
+                    ->orWhere('patient_profiles.given_name', 'like', $needle)
+                    ->orWhere('patient_profiles.family_name', 'like', $needle);
+            });
+        }
+
+        return response()->json(['data' => $query
+            ->orderBy('appointments.time_slot')
+            ->get([
+                'appointments.id', 'appointments.appointment_date', 'appointments.time_slot',
+                'appointments.visit_type', 'appointments.status', 'appointments.attendance_status',
+                'patient_profiles.patient_number', 'patient_profiles.given_name', 'patient_profiles.family_name',
+                'patient_profiles.mobile_number', 'services.name as service_name',
+            ])]);
+    }
+
+    public function patientSearch(Request $request): JsonResponse
+    {
+        $this->requireStaff($request, ['front_desk', 'administrator']);
+        $data = $request->validate([
+            'query' => ['required', 'string', 'min:2', 'max:100'],
+            'care_area_id' => ['required', 'integer', 'exists:care_areas,id'],
+        ]);
+        $this->assertCareAreaAccess($request, (int) $data['care_area_id']);
+        $needle = '%'.$data['query'].'%';
+
+        return response()->json(['data' => DB::table('patient_profiles')
+            ->leftJoin('patient_addresses', 'patient_addresses.patient_profile_id', '=', 'patient_profiles.id')
+            ->leftJoin('barangays', 'barangays.id', '=', 'patient_addresses.barangay_id')
+            ->where(function ($search) use ($needle): void {
+                $search->where('patient_profiles.patient_number', 'like', $needle)
+                    ->orWhere('patient_profiles.mobile_number', 'like', $needle)
+                    ->orWhere('patient_profiles.given_name', 'like', $needle)
+                    ->orWhere('patient_profiles.family_name', 'like', $needle);
+            })
+            ->orderBy('patient_profiles.family_name')
+            ->limit(10)
+            ->get([
+                'patient_profiles.id', 'patient_profiles.patient_number', 'patient_profiles.given_name',
+                'patient_profiles.family_name', 'patient_profiles.date_of_birth', 'patient_profiles.mobile_number',
+                'barangays.name as barangay_name',
+            ])]);
+    }
+
+    public function registerOnsite(Request $request): JsonResponse
+    {
+        $this->requireStaff($request, ['front_desk', 'administrator']);
+        $data = $request->validate([
+            'given_name' => ['required', 'string', 'max:100'], 'family_name' => ['required', 'string', 'max:100'],
+            'middle_name' => ['nullable', 'string', 'max:100'], 'suffix' => ['nullable', 'string', 'max:24'],
+            'date_of_birth' => ['required', 'date', 'before:today'], 'sex' => ['required', Rule::in(['male', 'female', 'other'])],
+            'mobile_number' => ['required', 'string', 'max:32', 'unique:patient_profiles,mobile_number'],
+            'email' => ['nullable', 'email:rfc', 'max:255', 'unique:users,email'],
+            'barangay_name' => ['required', 'string', 'max:120'], 'municipality_name' => ['required', 'string', 'max:120'],
+            'address_line' => ['required', 'string', 'max:255'], 'latitude' => ['nullable', 'numeric'], 'longitude' => ['nullable', 'numeric'],
+            'consent_to_treatment' => ['accepted'], 'privacy_acknowledged' => ['accepted'],
+        ]);
+        $defaultPassword = config('services.smartserve.onsite_default_password', 'ChangeMe123!');
+        $profile = DB::transaction(function () use ($data, $defaultPassword): PatientProfile {
+            $barangay = DB::table('barangays')->join('municipalities', 'municipalities.id', '=', 'barangays.municipality_id')
+                ->where('barangays.name', $data['barangay_name'])->where('municipalities.name', $data['municipality_name'])->first(['barangays.id']);
+            abort_unless($barangay, 422, 'Select a barangay from the registered municipality directory.');
+            $user = User::create(['name' => trim($data['given_name'].' '.$data['family_name']), 'email' => $data['email'] ?? null,
+                'password' => $defaultPassword, 'role' => 'patient', 'is_active' => true, 'must_change_password' => true]);
+            $profile = PatientProfile::create(['user_id' => $user->id, 'patient_number' => 'PT-'.str_pad((string) $user->id, 6, '0', STR_PAD_LEFT),
+                ...collect($data)->only(['given_name','family_name','middle_name','suffix','date_of_birth','sex','mobile_number'])->all(),
+                'consent_to_treatment' => true, 'consent_verified_at' => now(), 'privacy_acknowledged' => true, 'privacy_acknowledged_at' => now()]);
+            DB::table('patient_addresses')->insert(['patient_profile_id' => $profile->id, 'barangay_id' => $barangay->id,
+                'address_line' => $data['address_line'], 'latitude' => $data['latitude'] ?? null, 'longitude' => $data['longitude'] ?? null,
+                'location_source' => 'Staff-adjusted', 'location_verified_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+            return $profile;
+        });
+        return response()->json(['data' => ['id' => $profile->id, 'patient_number' => $profile->patient_number, 'default_password' => $defaultPassword]], 201);
+    }
+
+    public function markAbsent(Request $request, int $appointmentId): JsonResponse
+    {
+        $this->requireStaff($request, ['front_desk', 'administrator']);
+        DB::transaction(function () use ($request, $appointmentId): void {
+            $appointment = DB::table('appointments')->where('id', $appointmentId)->lockForUpdate()->first();
+            abort_unless($appointment, 404, 'Appointment not found.');
+            $this->assertCareAreaAccess($request, (int) $appointment->care_area_id);
+            abort_if(in_array($appointment->status, ['completed', 'cancelled'], true), 422, 'This appointment can no longer be marked absent.');
+
+            DB::table('appointments')->where('id', $appointmentId)->update([
+                'attendance_status' => 'absent', 'status' => 'no_show', 'updated_at' => now(),
+            ]);
+            DB::table('queue_tickets')->where('appointment_id', $appointmentId)->update([
+                'active_queue_number' => null, 'updated_at' => now(),
+            ]);
+        });
+
+        return response()->json(['message' => 'Appointment marked absent.']);
     }
 
     public function walkIn(Request $request): JsonResponse

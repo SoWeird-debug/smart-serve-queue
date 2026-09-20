@@ -24,7 +24,6 @@ import {
   Stethoscope,
   Trash2,
   TrendingUp,
-  Tv,
   Upload,
   UserCog,
   UserPlus,
@@ -4036,11 +4035,15 @@ function CastCenter() {
   const [smartTvUrls, setSmartTvUrls] = useState<string[]>([]);
   const [smartTvMessage, setSmartTvMessage] = useState("Preparing a local Smart TV display link…");
   const selected = castTargets.find((target) => target.id === selectedId) || castTargets[0];
-  const smartTvUrl = smartTvUrls[0]
-    ? selected.id === "animal-bite-queue-tv"
-      ? `${smartTvUrls[0].replace(/\/\?.*$/, "")}/animal-bite-queue`
-      : smartTvUrls[0]
-    : "";
+  const boardPath = selected.id === "animal-bite-queue-tv" ? "/queue/animal-bite" : "/queue/general-clinic";
+  const localBaseUrl = smartTvUrls[0]?.replace(/\/queue\/general-clinic$/, "");
+  const lanBoardUrl = localBaseUrl
+    ? `${localBaseUrl}${boardPath}`
+    : `${import.meta.env.VITE_CLINIC_LAN_URL || "http://192.168.68.67:8080"}${boardPath}`;
+  const isLocalBrowser = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+  const onlineBoardUrl = isLocalBrowser
+    ? `https://your-domain.example${boardPath}`
+    : `${window.location.origin}${boardPath}`;
   const loadSmartTvLinks = useCallback(async () => {
     try {
       const response = await fetch("/api/smart-tv-link", {
@@ -4076,7 +4079,7 @@ function CastCenter() {
               return (
                 <button key={target.id} type="button" onClick={() => setSelectedId(target.id)} className={`rounded-2xl border p-4 text-left transition-smooth ${active ? "border-primary bg-primary-soft shadow-soft" : "border-border bg-card hover:border-primary/40"}`}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="grid h-9 w-9 place-items-center rounded-xl bg-background text-primary"><Tv className="h-4 w-4" /></div>
+                    <div className="grid h-9 w-9 place-items-center rounded-xl bg-background text-primary"><Calendar className="h-4 w-4" /></div>
                     <Badge className="border-0 bg-secondary-soft text-secondary">Public-safe</Badge>
                   </div>
                   <p className="mt-3 font-semibold">{target.label}</p>
@@ -4091,23 +4094,31 @@ function CastCenter() {
           <Panel title="Open on the TV browser">
             <div className="rounded-2xl border border-secondary/20 bg-secondary-soft p-4">
               <div className="flex items-start gap-3">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-card text-secondary shadow-soft"><Tv className="h-5 w-5" /></span>
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-card text-secondary shadow-soft"><Calendar className="h-5 w-5" /></span>
                 <div>
                   <p className="text-sm font-semibold">Use the TV browser</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">Use the TV’s built-in browser while it is on the same clinic network. The page receives only public queue numbers, rooms, and queue states from the local staff workspace.</p>
                 </div>
               </div>
-              {smartTvUrl ? (
-                <>
-                  <code className="mt-4 block break-all rounded-xl bg-card/80 px-3 py-2 text-xs text-primary">{smartTvUrl}</code>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(smartTvUrl).then(() => setSmartTvMessage("Smart TV link copied. Open it in the TV browser.")).catch(() => setSmartTvMessage("Copy was blocked by this browser. Enter the displayed address manually on the TV."))}>
-                      <Copy className="mr-2 h-4 w-4" />Copy TV link
-                    </Button>
-                    <a href={smartTvUrl} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">Preview queue board</a>
-                  </div>
-                </>
-              ) : null}
+              <div className="mt-4 grid gap-2">
+                <div className="rounded-xl bg-card/80 px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-secondary">Online · Hostinger</p>
+                  <code className="mt-1 block break-all text-xs text-primary">{onlineBoardUrl}</code>
+                </div>
+                <div className="rounded-xl bg-card/80 px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-secondary">Clinic LAN · no internet needed</p>
+                  <code className="mt-1 block break-all text-xs text-primary">{lanBoardUrl}</code>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(onlineBoardUrl).then(() => setSmartTvMessage("Online queue-board link copied.")).catch(() => setSmartTvMessage("Copy was blocked by this browser. Enter the displayed address manually on the TV."))}>
+                  <Copy className="mr-2 h-4 w-4" />Copy online link
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(lanBoardUrl).then(() => setSmartTvMessage("LAN queue-board link copied.")).catch(() => setSmartTvMessage("Copy was blocked by this browser. Enter the displayed address manually on the TV."))}>
+                  <Copy className="mr-2 h-4 w-4" />Copy LAN link
+                </Button>
+                <a href={lanBoardUrl} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">Preview queue board</a>
+              </div>
             </div>
             <p role="status" className="mt-3 text-xs leading-5 text-muted-foreground">{smartTvMessage}</p>
           </Panel>

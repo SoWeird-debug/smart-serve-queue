@@ -1,14 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Heart, LockKeyhole, ShieldCheck, Smartphone } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { type StaffUser } from "@/lib/prototype-store";
 import {
-  usePrototypeStore,
-  type StaffUser,
-} from "@/lib/prototype-store";
+  ApiError,
+  type ApiStaffUser,
+  loginStaff as loginStaffRequest,
+  setApiAccessToken,
+  setupFirstAdministrator,
+  staffSetupStatus,
+} from "@/lib/api";
 
 type AccountMode = "staff" | "setup";
 
@@ -19,12 +24,12 @@ export function AccessGateway({
   onPatientAccess: () => void;
   onStaffAuthenticated: (user: StaffUser) => void;
 }) {
-  const { staffUsers, loginStaff, addStaffUser } = usePrototypeStore();
   const [mode, setMode] = useState<AccountMode>("staff");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
   const [setup, setSetup] = useState({
     fullName: "",
     username: "",
@@ -33,57 +38,72 @@ export function AccessGateway({
     password: "",
     confirmPassword: "",
   });
-  const hasAdministrator = staffUsers.some(
-    (user) => user.role === "Administrator",
-  );
+  const asStaffUser = (user: ApiStaffUser): StaffUser => ({
+    id: String(user.id),
+    fullName: user.name,
+    username: user.username,
+    password: "",
+    role: ({
+      front_desk: "Front desk",
+      nurse_triage: "Nurse / Triage",
+      doctor: "Doctor",
+      pharmacy: "Pharmacy",
+      administrator: "Administrator",
+    } as const)[user.role],
+    active: true,
+    passwordChangeRequired: user.must_change_password,
+    recoveryEmail: user.email || undefined,
+    assignedAreas: user.assigned_care_areas.includes("Animal Bite Center")
+      ? ["Animal Bite Center"]
+      : ["General Clinic"],
+  });
 
-  const signIn = () => {
-    const user = loginStaff(username, password);
-    if (!user) {
-      setError("Username or password is incorrect, or this account is disabled.");
-      return;
+  useEffect(() => {
+    void staffSetupStatus()
+      .then((result) => setSetupRequired(result.setup_required))
+      .catch(() => {
+        setSetupRequired(null);
+        setError("Cannot connect to the SmartServe server. Start Laravel and MySQL, then refresh.");
+      });
+  }, []);
+
+  const signIn = async () => {
+    try {
+      const result = await loginStaffRequest(username, password);
+      setApiAccessToken(result.token);
+      setError("");
+      onStaffAuthenticated(asStaffUser(result.user));
+    } catch (requestError) {
+      setError(requestError instanceof ApiError ? requestError.message : "Cannot sign in while the SmartServe server is unavailable.");
     }
-    setError("");
-    onStaffAuthenticated(user);
   };
-  const setupAdmin = () => {
-    if (!setup.fullName.trim() || !setup.username.trim()) {
-      setError("Enter the administrator name and username.");
+  const setupAdmin = async () => {
+    if (!setup.fullName.trim() || !setup.username.trim() || !setup.recoveryEmail.trim()) {
+      setError("Enter the administrator name, username, and email address.");
       return;
     }
-    if (setup.password.length < 4 || setup.password !== setup.confirmPassword) {
-      setError("Use a temporary password of at least 4 characters and confirm it exactly.");
+    if (setup.password.length < 12 || setup.password !== setup.confirmPassword) {
+      setError("Use a password of at least 12 characters and confirm it exactly.");
       return;
     }
-    const created = addStaffUser({
-      fullName: setup.fullName,
-      username: setup.username,
-      password: setup.password,
-      role: "Administrator",
-      active: true,
-      passwordChangeRequired: true,
-      recoveryEmail: setup.recoveryEmail,
-      mobile: setup.mobile,
-      title: "Clinic Administrator",
-      notes: "First-run administrator setup",
-    });
-    if (!created) {
-      setError("That username is already in use. Choose another username.");
-      return;
+    try {
+      await setupFirstAdministrator({
+        name: setup.fullName,
+        username: setup.username,
+        email: setup.recoveryEmail,
+        password: setup.password,
+        password_confirmation: setup.confirmPassword,
+      });
+      setSetupRequired(false);
+      setNotice("Administrator setup is complete in MySQL. Sign in with the credentials you just created.");
+      setError("");
+      setUsername(setup.username);
+      setPassword("");
+      setSetup({ fullName: "", username: "", recoveryEmail: "", mobile: "", password: "", confirmPassword: "" });
+      setMode("staff");
+    } catch (requestError) {
+      setError(requestError instanceof ApiError ? requestError.message : "Administrator setup could not be saved to MySQL.");
     }
-    setNotice("Administrator setup is complete. Sign in with the credentials you just created.");
-    setError("");
-    setUsername(setup.username);
-    setPassword("");
-    setSetup({
-      fullName: "",
-      username: "",
-      recoveryEmail: "",
-      mobile: "",
-      password: "",
-      confirmPassword: "",
-    });
-    setMode("staff");
   };
 
   return (
@@ -97,8 +117,8 @@ export function AccessGateway({
           <h1 className="mt-4 font-display text-4xl font-bold leading-tight">One secure entry for every clinic role.</h1>
           <p className="mt-4 max-w-md text-sm leading-6 text-primary-foreground/80">Patients sign in to book and view their care journey. Clinic staff sign in with an administrator-created username and password, then open only their assigned workspace.</p>
           <div className="mt-8 rounded-2xl border border-primary-foreground/15 bg-card/10 p-4 text-sm text-primary-foreground/85">
-            <p className="font-semibold">Local prototype notice</p>
-            <p className="mt-1 text-xs leading-5">This local-storage prototype demonstrates the access flow only. Do not use real clinic passwords or patient credentials until server authentication is added.</p>
+            <p className="font-semibold">Server authentication</p>
+            <p className="mt-1 text-xs leading-5">Staff credentials are verified by the SmartServe Laravel server and MySQL database. They are not saved in browser storage.</p>
           </div>
         </div>
         <div className="p-7 md:p-10">
@@ -125,7 +145,7 @@ export function AccessGateway({
                 {notice ? <p role="status" className="rounded-xl border border-secondary/20 bg-secondary-soft px-3 py-2 text-sm text-secondary-foreground">{notice}</p> : null}
                 <Button onClick={signIn} className="w-full"><LockKeyhole className="mr-2 h-4 w-4" />Sign in to workspace</Button>
               </div>
-              {!hasAdministrator ? (
+              {setupRequired ? (
                 <button type="button" onClick={() => { setMode("setup"); setError(""); }} className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-primary/30 px-3 py-3 text-sm font-medium text-primary hover:bg-primary-soft"><ShieldCheck className="h-4 w-4" />First-run administrator setup</button>
               ) : null}
             </div>
@@ -133,14 +153,14 @@ export function AccessGateway({
             <div>
               <div className="mb-5">
                 <p className="font-display text-2xl font-bold">Set up the first administrator</p>
-                <p className="mt-1 text-sm text-muted-foreground">Create the local administrator account that will create all staff and doctor logins.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Create the first administrator account in the SmartServe MySQL database.</p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2"><Label htmlFor="setup-name">Full name</Label><Input id="setup-name" value={setup.fullName} onChange={(event) => setSetup({ ...setup, fullName: event.target.value })} className="mt-1" /></div>
                 <div><Label htmlFor="setup-username">Username</Label><Input id="setup-username" value={setup.username} onChange={(event) => setSetup({ ...setup, username: event.target.value })} className="mt-1" autoComplete="username" /></div>
                 <div><Label htmlFor="setup-email">Recovery email</Label><Input id="setup-email" type="email" value={setup.recoveryEmail} onChange={(event) => setSetup({ ...setup, recoveryEmail: event.target.value })} className="mt-1" autoComplete="email" /></div>
                 <div className="sm:col-span-2"><Label htmlFor="setup-mobile">Mobile number</Label><Input id="setup-mobile" value={setup.mobile} onChange={(event) => setSetup({ ...setup, mobile: event.target.value })} className="mt-1" autoComplete="tel" /></div>
-                <div><Label htmlFor="setup-password">Temporary password</Label><Input id="setup-password" type="password" value={setup.password} onChange={(event) => setSetup({ ...setup, password: event.target.value })} className="mt-1" autoComplete="new-password" /></div>
+                <div><Label htmlFor="setup-password">Password</Label><Input id="setup-password" type="password" value={setup.password} onChange={(event) => setSetup({ ...setup, password: event.target.value })} className="mt-1" autoComplete="new-password" /></div>
                 <div><Label htmlFor="setup-confirm">Confirm password</Label><Input id="setup-confirm" type="password" value={setup.confirmPassword} onChange={(event) => setSetup({ ...setup, confirmPassword: event.target.value })} className="mt-1" autoComplete="new-password" /></div>
               </div>
               {error ? <p role="alert" className="mt-4 rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}

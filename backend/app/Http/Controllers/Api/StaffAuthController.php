@@ -7,11 +7,19 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class StaffAuthController extends Controller
 {
     private const STAFF_ROLES = ['front_desk', 'nurse_triage', 'doctor', 'pharmacy', 'administrator'];
+
+    public function setupStatus(): JsonResponse
+    {
+        return response()->json([
+            'setup_required' => ! User::where('role', 'administrator')->exists(),
+        ]);
+    }
 
     public function setupAdministrator(Request $request): JsonResponse
     {
@@ -69,7 +77,12 @@ class StaffAuthController extends Controller
             'username' => $user->username,
             'email' => $user->email,
             'role' => $user->role,
-            'assigned_care_areas' => $user->assigned_care_areas ?? [],
+            // The web client needs display names to select the correct staff
+            // workspace. Database IDs remain the source of authorization.
+            'assigned_care_areas' => DB::table('care_areas')
+                ->whereIn('id', $user->assigned_care_areas ?? [])
+                ->pluck('name')
+                ->all(),
             'must_change_password' => $user->must_change_password,
         ];
     }
