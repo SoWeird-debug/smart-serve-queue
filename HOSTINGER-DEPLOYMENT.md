@@ -24,8 +24,10 @@ This repository is prepared for a **single-domain Laravel deployment**:
 ## Hostinger setup
 
 1. Create a PHP/Laravel website and a MySQL database/user in hPanel.
-2. Point the domain's document root to `backend/public`. Do not expose the
-   `backend` folder itself.
+2. In Hostinger File Manager, upload the Laravel `backend` application into
+   the private `smartserve` folder beside `public_html`. Do not expose it
+   publicly. Upload `HOSTINGER-PUBLIC-INDEX.php` to `public_html` and rename
+   it to `index.php`; it boots `../smartserve` securely.
 3. Copy `backend/.env.hostinger.example` to `backend/.env` and fill in:
 
    ```env
