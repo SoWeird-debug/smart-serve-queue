@@ -211,6 +211,17 @@ function localQueueDisplay(): Plugin {
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  // Laravel owns public/.htaccess, favicon and robots.txt. Application images
+  // are imported by React and emitted into assets/, so no Vite public copy is
+  // needed during an integrated Laravel build.
+  publicDir: false,
+  // Production output is placed beside Laravel's public/index.php. On
+  // Hostinger the domain web root must point to backend/public, so the React
+  // app and /api/v1 Laravel API share one HTTPS origin.
+  build: {
+    outDir: "backend/public",
+    emptyOutDir: false,
+  },
   server: {
     host: "::",
     port: 8080,
