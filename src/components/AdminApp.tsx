@@ -70,6 +70,16 @@ import {
 import { DiseaseTrendMap } from "@/components/DiseaseTrendMap";
 import superHealthCenterLogo from "@/assets/super-health-center-jones-logo.png";
 import {
+  ApiError,
+  adminCareAreas,
+  adminStaff,
+  createAdminStaff,
+  resetAdminStaffPassword,
+  updateAdminStaff,
+  type ApiCareArea,
+  type ApiManagedStaffUser,
+} from "@/lib/api";
+import {
   usePrototypeStore,
   type AuditEvent,
   type ConsultationTemplate,
@@ -404,14 +414,7 @@ function PageContent({ page, store }: any) {
       />
     );
   if (page === "users")
-    return (
-      <StaffPage
-        users={staffUsers}
-        add={store.addStaffUser}
-        update={store.updateStaffUser}
-        remove={store.deleteStaffUser}
-      />
-    );
+    return <StaffPage />;
   if (page === "cast") return <CastCenter />;
   if (page === "settings") return <SettingsPage store={store} />;
   if (page === "analytics") return <AnalyticsPage store={store} />;
@@ -3671,25 +3674,84 @@ const doctorStatuses: DoctorAvailability[] = [
   "On leave",
 ];
 
-function StaffPage({
-  users,
-  add,
-  update,
-  remove,
-}: {
-  users: StaffUser[];
-  add: (user: Omit<StaffUser, "id">) => boolean;
-  update: (id: string, patch: Partial<StaffUser>) => boolean;
-  remove: (id: string) => void;
-}) {
+const apiRoleFor = (role: StaffRole): ApiManagedStaffUser["role"] => ({
+  "Front desk": "front_desk",
+  "Nurse / Triage": "nurse_triage",
+  Doctor: "doctor",
+  Pharmacy: "pharmacy",
+  Administrator: "administrator",
+}[role]);
+
+const displayRoleFor = (role: ApiManagedStaffUser["role"]): StaffRole => ({
+  front_desk: "Front desk",
+  nurse_triage: "Nurse / Triage",
+  doctor: "Doctor",
+  pharmacy: "Pharmacy",
+  administrator: "Administrator",
+}[role]);
+
+const apiDoctorStatusFor = (status: DoctorAvailability) => ({
+  Available: "available",
+  "With patient": "with_patient",
+  "On break": "on_break",
+  "Off duty": "off_duty",
+  "On leave": "on_leave",
+}[status] as NonNullable<ApiManagedStaffUser["doctor_availability"]>);
+
+const displayDoctorStatusFor = (status: ApiManagedStaffUser["doctor_availability"]): DoctorAvailability => ({
+  available: "Available",
+  with_patient: "With patient",
+  on_break: "On break",
+  off_duty: "Off duty",
+  on_leave: "On leave",
+}[status || "off_duty"] as DoctorAvailability);
+
+function StaffPage() {
   const [dialog, setDialog] = useState<AccountDialog>(null);
   const [selected, setSelected] = useState<StaffUser | null>(null);
   const [form, setForm] = useState<AccountForm>(blankAccountForm);
   const [createRole, setCreateRole] = useState<StaffRole>("Front desk");
   const [error, setError] = useState("");
   const [accountQuery, setAccountQuery] = useState("");
+  const [users, setUsers] = useState<StaffUser[]>([]);
+  const [careAreas, setCareAreas] = useState<ApiCareArea[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const isDoctor = dialog === "doctor" || (dialog === "edit" && selected?.role === "Doctor");
   const isAdmin = dialog === "admin" || (dialog === "edit" && selected?.role === "Administrator");
+
+  const loadAccounts = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [{ data: managedUsers }, { data: areas }] = await Promise.all([adminStaff(), adminCareAreas()]);
+      const areaNames = new Map(areas.map((area) => [area.id, area.name]));
+      setCareAreas(areas);
+      setUsers(managedUsers.map((user) => ({
+        id: String(user.id),
+        fullName: user.name,
+        username: user.username,
+        password: "",
+        role: displayRoleFor(user.role),
+        active: user.is_active,
+        passwordChangeRequired: user.must_change_password,
+        doctorStatus: user.role === "doctor" ? displayDoctorStatusFor(user.doctor_availability) : undefined,
+        recoveryEmail: user.email || undefined,
+        assignedAreas: user.assigned_care_area_ids
+          .map((areaId) => areaNames.get(areaId))
+          .filter((name): name is "General Clinic" | "Animal Bite Center" => name === "General Clinic" || name === "Animal Bite Center"),
+      })));
+      setError("");
+    } catch (requestError) {
+      setError(requestError instanceof ApiError ? requestError.message : "Unable to load staff accounts from the SmartServe server.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadAccounts(); }, [loadAccounts]);
+
+  const assignedAreaIds = (areas: AccountForm["assignedAreas"]) => careAreas
+    .filter((area) => areas.includes(area.name as "General Clinic" | "Animal Bite Center"))
+    .map((area) => area.id);
 
   const close = () => {
     setDialog(null);
@@ -3728,14 +3790,19 @@ function StaffPage({
     setForm(blankAccountForm());
     setError("");
   };
-  const save = () => {
+  const save = async () => {
     if (dialog === "reset") {
-      if (!selected || form.password.length < 4 || form.password !== form.confirmPassword) {
-        setError("Use a temporary password of at least 4 characters and confirm it exactly.");
+      if (!selected || form.password.length < 12 || form.password !== form.confirmPassword) {
+        setError("Use a temporary password of at least 12 characters and confirm it exactly.");
         return;
       }
-      update(selected.id, { password: form.password, passwordChangeRequired: true });
-      close();
+      try {
+        await resetAdminStaffPassword(Number(selected.id), form.password, form.confirmPassword);
+        await loadAccounts();
+        close();
+      } catch (requestError) {
+        setError(requestError instanceof ApiError ? requestError.message : "The password could not be reset.");
+      }
       return;
     }
     if (!form.fullName.trim() || !form.username.trim()) {
@@ -3743,49 +3810,45 @@ function StaffPage({
       return;
     }
     if (dialog === "edit" && selected) {
-      const updated = update(selected.id, {
-        fullName: form.fullName,
-        username: form.username,
-        active: form.active,
-        doctorStatus: selected.role === "Doctor" ? form.doctorStatus : undefined,
-        recoveryEmail: selected.role === "Administrator" ? form.recoveryEmail : undefined,
-        mobile: selected.role === "Administrator" ? form.mobile : undefined,
-        title: selected.role === "Administrator" ? form.title : undefined,
-        notes: selected.role === "Administrator" ? form.notes : undefined,
-        assignedAreas: form.assignedAreas,
-      });
-      if (!updated) {
-        setError("That username is already in use. Choose another username.");
-        return;
+      try {
+        await updateAdminStaff(Number(selected.id), {
+          name: form.fullName.trim(),
+          username: form.username.trim(),
+          email: form.recoveryEmail.trim() || null,
+          is_active: form.active,
+          assigned_care_area_ids: selected.role === "Administrator" ? [] : assignedAreaIds(form.assignedAreas),
+          ...(selected.role === "Doctor" ? { doctor_availability: apiDoctorStatusFor(form.doctorStatus) } : {}),
+        });
+        await loadAccounts();
+        close();
+      } catch (requestError) {
+        setError(requestError instanceof ApiError ? requestError.message : "The account could not be updated.");
       }
-      close();
       return;
     }
-    if (form.password.length < 4 || form.password !== form.confirmPassword) {
-      setError("Use a temporary password of at least 4 characters and confirm it exactly.");
+    if (form.password.length < 12 || form.password !== form.confirmPassword) {
+      setError("Use a temporary password of at least 12 characters and confirm it exactly.");
       return;
     }
     const role: StaffRole =
       dialog === "doctor" ? "Doctor" : dialog === "admin" ? "Administrator" : createRole;
-    const created = add({
-      fullName: form.fullName,
-      username: form.username,
-      password: form.password,
-      role,
-      active: form.active,
-      passwordChangeRequired: true,
-      doctorStatus: role === "Doctor" ? form.doctorStatus : undefined,
-      recoveryEmail: role === "Administrator" ? form.recoveryEmail : undefined,
-      mobile: role === "Administrator" ? form.mobile : undefined,
-      title: role === "Administrator" ? form.title : undefined,
-      notes: role === "Administrator" ? form.notes : undefined,
-      assignedAreas: form.assignedAreas,
-    });
-    if (!created) {
-      setError("That username is already in use. Choose another username.");
-      return;
+    try {
+      await createAdminStaff({
+        name: form.fullName.trim(),
+        username: form.username.trim(),
+        email: form.recoveryEmail.trim() || null,
+        password: form.password,
+        password_confirmation: form.confirmPassword,
+        role: apiRoleFor(role),
+        is_active: form.active,
+        assigned_care_area_ids: role === "Administrator" ? [] : assignedAreaIds(form.assignedAreas),
+        ...(role === "Doctor" ? { doctor_availability: apiDoctorStatusFor(form.doctorStatus) } : {}),
+      });
+      await loadAccounts();
+      close();
+    } catch (requestError) {
+      setError(requestError instanceof ApiError ? requestError.message : "The account could not be created.");
     }
-    close();
   };
   const dialogTitle =
     dialog === "staff"
@@ -3803,8 +3866,8 @@ function StaffPage({
       : dialog === "doctor"
         ? "Only doctor accounts have an availability status that patients can view before booking."
         : dialog === "reset"
-          ? "Set a new temporary password. The user must change it at first sign-in in the production version."
-          : "Local prototype credentials route this user to the workspace assigned to their role.";
+          ? "Set a new temporary password. The user must change it at first sign-in."
+          : "Accounts are saved in the SmartServe MySQL database and can sign in from any device.";
   const visibleUsers = users.filter((user) =>
     [user.fullName, user.username, user.role, user.assignedAreas?.join(" ")]
       .filter(Boolean)
@@ -3852,6 +3915,7 @@ function StaffPage({
           </div>
         }
       >
+        {error && dialog === null ? <p role="alert" className="mx-3 mt-3 rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
         <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="sticky top-0 z-10 hidden border-b border-border bg-muted/95 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground xl:grid xl:grid-cols-[minmax(210px,1.3fr)_minmax(125px,0.75fr)_minmax(120px,0.75fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(110px,0.7fr)_auto] xl:gap-3">
           <span>Account holder</span>
@@ -3862,7 +3926,8 @@ function StaffPage({
           <span>Role</span>
           <span className="text-center">Edit</span>
         </div>
-        {visibleUsers.map((user) => {
+        {isLoading ? <p className="px-3 py-6 text-sm text-muted-foreground">Loading staff accounts from MySQL…</p> : null}
+        {!isLoading && visibleUsers.map((user) => {
           const initials = user.fullName
             .split(/\s+/)
             .filter(Boolean)
@@ -3893,7 +3958,7 @@ function StaffPage({
             </div>
           );
         })}
-        {!visibleUsers.length ? <Empty text={users.length ? "No accounts match your search." : "No login accounts yet. Select an icon above to create staff, doctor, or administrator access."} /> : null}
+        {!isLoading && !visibleUsers.length ? <Empty text={users.length ? "No accounts match your search." : "No login accounts yet. Select an icon above to create staff, doctor, or administrator access."} /> : null}
         </div>
       </Panel>
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && close()}>
@@ -3958,7 +4023,7 @@ function StaffPage({
             {(dialog !== "edit" || dialog === "reset") ? (
               <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
                 <div>
-                  <Label htmlFor="temporary-password">Temporary password</Label>
+                      <Label htmlFor="temporary-password">Temporary password</Label>
                   <Input id="temporary-password" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="mt-1" autoComplete="new-password" />
                 </div>
                 <div>
@@ -3982,17 +4047,6 @@ function StaffPage({
                   onClick={() => setForm({ ...form, active: !form.active })}
                 >
                   <ShieldCheck className="mr-2 h-4 w-4" />{form.active ? "Active" : "Disabled"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={() => {
-                    if (!window.confirm(`Delete ${selected.fullName}? This removes their local login.`)) return;
-                    remove(selected.id);
-                    close();
-                  }}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />Delete
                 </Button>
               </div>
             ) : null}

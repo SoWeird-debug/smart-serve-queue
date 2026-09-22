@@ -9,6 +9,16 @@ use Illuminate\Support\Facades\DB;
 
 class DirectoryController extends Controller
 {
+    public function careAreas(): JsonResponse
+    {
+        return response()->json([
+            'data' => DB::table('care_areas')
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get(['id', 'name', 'building']),
+        ]);
+    }
+
     public function municipalities(Request $request): JsonResponse
     {
         $query = DB::table('municipalities')

@@ -26,6 +26,7 @@ Route::prefix('v1')->group(function (): void {
     Route::post('/staff-auth/login', [StaffAuthController::class, 'login'])->middleware('throttle:10,1');
     Route::get('/directories/municipalities', [DirectoryController::class, 'municipalities']);
     Route::get('/directories/municipalities/{municipalityId}/barangays', [DirectoryController::class, 'barangays']);
+    Route::get('/directories/care-areas', [DirectoryController::class, 'careAreas']);
     Route::get('/services', [DirectoryController::class, 'services']);
     Route::get('/public/queue-board/{board}', [PublicQueueBoardController::class, 'show'])->middleware('throttle:120,1');
     Route::middleware('auth:sanctum')->group(function (): void {

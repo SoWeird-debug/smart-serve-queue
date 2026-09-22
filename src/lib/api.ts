@@ -45,6 +45,20 @@ export type ApiStaffUser = {
   must_change_password: boolean;
 };
 
+export type ApiManagedStaffUser = {
+  id: number;
+  name: string;
+  username: string;
+  email: string | null;
+  role: "front_desk" | "nurse_triage" | "doctor" | "pharmacy" | "administrator";
+  is_active: boolean;
+  must_change_password: boolean;
+  assigned_care_area_ids: number[];
+  doctor_availability: "available" | "with_patient" | "on_break" | "off_duty" | "on_leave" | null;
+};
+
+export type ApiCareArea = { id: number; name: string; building: string | null };
+
 type StaffAuthResponse = { token: string; user: ApiStaffUser };
 
 export type ApiPatient = {
@@ -170,6 +184,44 @@ export const loginStaff = (username: string, password: string) =>
   request<StaffAuthResponse>("/staff-auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
+  });
+
+export const adminStaff = () => request<{ data: ApiManagedStaffUser[] }>("/admin/staff");
+
+export const adminCareAreas = () => request<{ data: ApiCareArea[] }>("/directories/care-areas");
+
+export const createAdminStaff = (payload: {
+  name: string;
+  username: string;
+  email?: string | null;
+  password: string;
+  password_confirmation: string;
+  role: ApiManagedStaffUser["role"];
+  is_active: boolean;
+  assigned_care_area_ids?: number[];
+  doctor_availability?: NonNullable<ApiManagedStaffUser["doctor_availability"]>;
+}) => request<{ data: ApiManagedStaffUser }>("/admin/staff", {
+  method: "POST",
+  body: JSON.stringify(payload),
+});
+
+export const updateAdminStaff = (staffId: number, payload: Partial<{
+  name: string;
+  username: string;
+  email: string | null;
+  role: ApiManagedStaffUser["role"];
+  is_active: boolean;
+  assigned_care_area_ids: number[];
+  doctor_availability: NonNullable<ApiManagedStaffUser["doctor_availability"]>;
+}>) => request<{ data: ApiManagedStaffUser }>(`/admin/staff/${staffId}`, {
+  method: "PATCH",
+  body: JSON.stringify(payload),
+});
+
+export const resetAdminStaffPassword = (staffId: number, password: string, passwordConfirmation: string) =>
+  request<void>(`/admin/staff/${staffId}/reset-password`, {
+    method: "POST",
+    body: JSON.stringify({ password, password_confirmation: passwordConfirmation }),
   });
 
 export const patientLogin = (identifier: string, password: string) =>
