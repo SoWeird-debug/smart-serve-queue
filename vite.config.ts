@@ -4,7 +4,6 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { networkInterfaces } from "node:os";
 import type { IncomingMessage } from "node:http";
-import { componentTagger } from "lovable-tagger";
 
 type PublicQueueItem = {
   id: string;
@@ -210,7 +209,7 @@ function localQueueDisplay(): Plugin {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(() => ({
   // Laravel owns public/.htaccess, favicon and robots.txt. Application images
   // are imported by React and emitted into assets/, so no Vite public copy is
   // needed during an integrated Laravel build.
@@ -240,8 +239,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     localQueueDisplay(),
-    mode === "development" && componentTagger(),
-  ].filter(Boolean),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
