@@ -9,23 +9,28 @@ use Illuminate\Support\Str;
 
 class ResetClinicDemoAccounts extends Command
 {
-    protected $signature = 'smartserve:demo-accounts {--apply : Disable existing clinic logins and generate demo accounts}';
+    protected $signature = 'smartserve:demo-accounts {--apply : Apply the previewed changes} {--create-only : Local testing only; add missing demo accounts without changing existing accounts}';
 
     protected $description = 'Preview or reset clinic access without deleting patient or clinical history';
 
     public function handle(): int
     {
         $roles = ['administrator', 'front_desk', 'nurse_triage', 'doctor', 'pharmacy'];
+        $createOnly = (bool) $this->option('create-only');
+        if ($createOnly && ! app()->environment(['local', 'testing'])) {
+            $this->error('Create-only demo setup is restricted to local/testing environments.');
+            return self::FAILURE;
+        }
         $existing = User::whereIn('role', $roles)->get();
         $this->info('Environment: '.app()->environment().' | Database: '.DB::connection()->getDatabaseName());
-        $this->warn('Existing clinic logins will be disabled. Patient accounts and clinical records are preserved.');
+        $this->warn($createOnly ? 'Only missing demo accounts will be added. Existing accounts and records remain unchanged.' : 'Existing clinic logins will be disabled. Patient accounts and clinical records are preserved.');
         $this->line('Clinic accounts in scope: '.$existing->count());
         if (! $this->option('apply')) {
             $this->info('Preview only. Run again with --apply after backing up the database.');
 
             return self::SUCCESS;
         }
-        if (! $this->confirm('Have you backed up this database and want to replace clinic access with five demo logins?', false)) {
+        if (! $this->confirm($createOnly ? 'Create missing local demo accounts without changing existing accounts?' : 'Have you backed up this database and want to replace clinic access with five demo logins?', false)) {
             return self::FAILURE;
         }
 
@@ -42,14 +47,14 @@ class ResetClinicDemoAccounts extends Command
                 return self::FAILURE;
             }
         }
-        if ($existing->contains(fn ($user) => $user->patientProfile()->exists())) {
+        if (! $createOnly && $existing->contains(fn ($user) => $user->patientProfile()->exists())) {
             $this->error('A clinic account has a patient profile. Resolve this mixed identity first. No changes made.');
 
             return self::FAILURE;
         }
 
-        $credentials = DB::transaction(function () use ($existing, $roles) {
-            foreach ($existing as $user) {
+        $credentials = DB::transaction(function () use ($existing, $roles, $createOnly) {
+            foreach ($createOnly ? [] : $existing as $user) {
                 $user->update(['is_active' => false, 'remember_token' => null]);
                 $user->tokens()->delete();
                 DB::table('sessions')->where('user_id', $user->id)->delete();
@@ -60,6 +65,10 @@ class ResetClinicDemoAccounts extends Command
             $credentials = [];
             foreach ($roles as $role) {
                 $username = 'demo_'.$role;
+                if ($createOnly && User::where('username', $username)->exists()) {
+                    $credentials[] = [$role, $username, '(existing account unchanged)'];
+                    continue;
+                }
                 $password = Str::random(24).'!7aA';
                 User::updateOrCreate(['username' => $username], [
                     'name' => 'Demo '.Str::headline($role),
@@ -79,7 +88,7 @@ class ResetClinicDemoAccounts extends Command
         $this->table(['Role', 'Username', 'Password (save privately)'], $credentials);
         $this->warn('These demo inboxes cannot receive mail. Normal signup and real-email recovery are unchanged.');
         $this->warn('Demo actions use the real database. Do not enter fake clinical encounters on the live site.');
-        $this->info('No patients or clinical records were deleted. Re-running rotates all demo passwords.');
+        $this->info($createOnly ? 'No existing accounts or clinical records changed. Save the new passwords privately.' : 'No patients or clinical records were deleted. Re-running rotates all demo passwords.');
 
         return self::SUCCESS;
     }

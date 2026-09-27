@@ -10,6 +10,19 @@ class DemoAccountsCommandTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_create_only_preserves_existing_accounts_and_passwords(): void
+    {
+        $admin = User::factory()->create(['role' => 'administrator', 'is_active' => true]);
+        $before = $admin->fresh()->getAttributes();
+        $question = 'Create missing local demo accounts without changing existing accounts?';
+        $this->artisan('smartserve:demo-accounts --create-only --apply')->expectsConfirmation($question, 'yes')->assertSuccessful();
+        $this->assertSame($before, $admin->fresh()->getAttributes());
+        $password = User::where('username', 'demo_administrator')->value('password');
+        $this->artisan('smartserve:demo-accounts --create-only --apply')->expectsConfirmation($question, 'yes')->assertSuccessful();
+        $this->assertDatabaseCount('users', 6);
+        $this->assertSame($password, User::where('username', 'demo_administrator')->value('password'));
+    }
+
     public function test_preview_does_not_modify_accounts(): void
     {
         $staff = User::factory()->create(['role' => 'administrator', 'is_active' => true]);
