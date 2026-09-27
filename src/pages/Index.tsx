@@ -1,12 +1,12 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { UserRound } from "lucide-react";
 import { AccountProfileDialog } from "@/components/AccountProfileDialog";
 
-import { AccessGateway } from "@/components/AccessGateway";
+import { AccessGateway, asStaffUser } from "@/components/AccessGateway";
 import { Button } from "@/components/ui/button";
 import type { StaffUser } from "@/lib/prototype-store";
 import superHealthCenterLogo from "@/assets/super-health-center-jones-logo.png";
-import { logoutAccount, setApiAccessToken, type ApiPatient } from "@/lib/api";
+import { getStoredApiSession, logoutAccount, patientCurrent, setApiAccessToken, staffCurrent, type ApiPatient } from "@/lib/api";
 
 type Workspace = "patient" | "staff" | "doctor" | "pharmacy" | "admin";
 const PatientApp = lazy(() => import("@/components/PatientApp").then((module) => ({ default: module.PatientApp })));
@@ -32,6 +32,8 @@ const Index = () => {
   const [patientRegistration, setPatientRegistration] = useState<{ email: string; token: string } | null>(null);
   const [accessNotice, setAccessNotice] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [storedSession] = useState(getStoredApiSession);
+  const [restoringSession, setRestoringSession] = useState(Boolean(storedSession));
   const enterStaffWorkspace = (user: StaffUser) => {
     setSignedInUser(user);
     setWorkspace(workspaceForRole(user.role));
@@ -51,11 +53,47 @@ const Index = () => {
     returnToAccess();
   };
 
+  useEffect(() => {
+    if (!storedSession || displayMode === "queue-tv" || queueBoardPath.startsWith("/queue/") || queueBoardPath === "/animal-bite-queue") {
+      setRestoringSession(false);
+      return;
+    }
+
+    let active = true;
+    const restore = async () => {
+      try {
+        if (storedSession.role === "patient") {
+          const result = await patientCurrent();
+          if (!active) return;
+          setSignedInPatient(result.patient);
+          setWorkspace("patient");
+        } else {
+          const result = await staffCurrent();
+          if (!active) return;
+          const user = asStaffUser(result.user);
+          setSignedInUser(user);
+          setWorkspace(workspaceForRole(user.role));
+        }
+      } catch {
+        setApiAccessToken(null);
+        if (active) setAccessNotice("Your saved session expired. Please sign in again.");
+      } finally {
+        if (active) setRestoringSession(false);
+      }
+    };
+    void restore();
+    return () => { active = false; };
+  }, [displayMode, queueBoardPath, storedSession]);
+
   if (queueBoardPath === "/queue/animal-bite" || queueBoardPath === "/animal-bite-queue") {
     return <QueueTvDisplay area="Animal Bite Center" />;
   }
   if (queueBoardPath === "/queue/general-clinic") return <QueueTvDisplay area="General Clinic" />;
   if (displayMode === "queue-tv") return <QueueTvDisplay />;
+
+  if (restoringSession) {
+    return <div role="status" className="grid min-h-dvh place-items-center bg-slate-50 text-slate-700">Restoring your session…</div>;
+  }
 
   if (!workspace) {
     return (

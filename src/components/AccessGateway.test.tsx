@@ -83,6 +83,7 @@ describe("unified account access", () => {
     fireEvent.change(screen.getByLabelText("Password"), {
       target: { value: "PersonalPassword123!" },
     });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Remember me/i }));
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() =>
       expect(onStaffAuthenticated).toHaveBeenCalledWith(
@@ -92,6 +93,11 @@ describe("unified account access", () => {
     expect(api.unifiedLogin).toHaveBeenCalledWith(
       "doctor_test",
       "PersonalPassword123!",
+    );
+    expect(api.setApiAccessToken).toHaveBeenCalledWith(
+      "test-token",
+      true,
+      "doctor",
     );
   });
 

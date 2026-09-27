@@ -85,6 +85,7 @@ export function AccessGateway({
   );
   const [identifier, setIdentifier] = useState(registrationEmail);
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [consent, setConsent] = useState(false);
@@ -146,7 +147,7 @@ export function AccessGateway({
     try {
       if (mode === "login") {
         const result = await unifiedLogin(identifier.trim(), password);
-        setApiAccessToken(result.token);
+        setApiAccessToken(result.token, remember, result.role);
         try {
           if (result.role === "patient")
             onPatientAuthenticated((await patientCurrent()).patient);
@@ -321,13 +322,29 @@ export function AccessGateway({
               />
             )}
             {mode === "login" && (
-              <AccessField
-                label="Password"
-                type="password"
-                value={password}
-                onChange={setPassword}
-                autoComplete="current-password"
-              />
+              <>
+                <AccessField
+                  label="Password"
+                  type="password"
+                  value={password}
+                  onChange={setPassword}
+                  autoComplete="current-password"
+                />
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-900">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4"
+                    checked={remember}
+                    onChange={(event) => setRemember(event.target.checked)}
+                  />
+                  <span>
+                    <span className="block font-medium">Remember me</span>
+                    <span className="block text-xs text-slate-600">
+                      Stay signed in on this device. Do not use this on a shared device.
+                    </span>
+                  </span>
+                </label>
+              </>
             )}
             {mode === "setup" && (
               <>

@@ -2,13 +2,46 @@ type ApiErrorPayload = { message?: string; errors?: Record<string, string[]> };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
-// Deliberately memory-only. Authentication is not written to localStorage or
-// sessionStorage; refreshing the browser requires sign-in again until secure
-// server-side session handling is introduced.
-let accessToken: string | null = null;
+export type ApiAccountRole = ApiStaffUser["role"] | "patient";
+export type StoredApiSession = { token: string; role: ApiAccountRole };
 
-export const setApiAccessToken = (token: string | null) => {
+const persistentSessionKey = "smartserve.auth.remembered.v1";
+const browserSessionKey = "smartserve.auth.session.v1";
+
+const readStoredSession = (storage: Storage, key: string): StoredApiSession | null => {
+  try {
+    const value = JSON.parse(storage.getItem(key) || "null") as Partial<StoredApiSession> | null;
+    return value?.token && value?.role ? value as StoredApiSession : null;
+  } catch {
+    storage.removeItem(key);
+    return null;
+  }
+};
+
+export const getStoredApiSession = (): StoredApiSession | null => {
+  if (typeof window === "undefined") return null;
+  return readStoredSession(window.sessionStorage, browserSessionKey)
+    || readStoredSession(window.localStorage, persistentSessionKey);
+};
+
+let accessToken: string | null = getStoredApiSession()?.token || null;
+
+export const setApiAccessToken = (
+  token: string | null,
+  remember = false,
+  role?: ApiAccountRole,
+) => {
   accessToken = token;
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(persistentSessionKey);
+  window.sessionStorage.removeItem(browserSessionKey);
+  if (!token || !role) return;
+
+  const value = JSON.stringify({ token, role } satisfies StoredApiSession);
+  (remember ? window.localStorage : window.sessionStorage).setItem(
+    remember ? persistentSessionKey : browserSessionKey,
+    value,
+  );
 };
 
 export class ApiError extends Error {
@@ -61,7 +94,7 @@ export type ApiManagedStaffUser = {
 export type ApiCareArea = { id: number; name: string; building: string | null };
 
 type StaffAuthResponse = { token: string; user: ApiStaffUser };
-type UnifiedAuthResponse = { token: string; role: ApiStaffUser["role"] | "patient" };
+type UnifiedAuthResponse = { token: string; role: ApiAccountRole };
 
 export type ApiPatient = {
   id: number;
