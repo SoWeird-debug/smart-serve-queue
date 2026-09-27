@@ -111,5 +111,11 @@ class DatabaseSeeder extends Seeder
                 [...$service, 'is_active' => true, 'updated_at' => $now, 'created_at' => $now],
             );
         }
+
+        // Predictable bypass accounts are strictly local/testing fixtures. A
+        // production seed keeps reference data but never creates these users.
+        if (app()->environment(['local', 'testing'])) {
+            $this->call(LocalDemoAccountSeeder::class);
+        }
     }
 }

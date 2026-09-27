@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use Database\Seeders\LocalDemoAccountSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -17,10 +18,27 @@ class DemoAccountsCommandTest extends TestCase
         $question = 'Create missing local demo accounts without changing existing accounts?';
         $this->artisan('smartserve:demo-accounts --create-only --apply')->expectsConfirmation($question, 'yes')->assertSuccessful();
         $this->assertSame($before, $admin->fresh()->getAttributes());
+        $this->assertTrue(password_verify(LocalDemoAccountSeeder::PASSWORD, User::where('username', 'demo_administrator')->value('password')));
         $password = User::where('username', 'demo_administrator')->value('password');
         $this->artisan('smartserve:demo-accounts --create-only --apply')->expectsConfirmation($question, 'yes')->assertSuccessful();
         $this->assertDatabaseCount('users', 6);
         $this->assertSame($password, User::where('username', 'demo_administrator')->value('password'));
+    }
+
+    public function test_database_seeder_creates_five_verified_local_demo_accounts(): void
+    {
+        $existing = User::factory()->create(['role' => 'administrator']);
+        $before = $existing->fresh()->getAttributes();
+        $this->seed();
+        $this->assertSame($before, $existing->fresh()->getAttributes());
+        $this->assertSame(5, User::where('username', 'like', 'demo_%')->count());
+        foreach (LocalDemoAccountSeeder::ROLES as $role) {
+            $demo = User::where('username', 'demo_'.$role)->firstOrFail();
+            $this->assertTrue($demo->is_active);
+            $this->assertTrue($demo->hasVerifiedEmail());
+            $this->assertFalse($demo->must_change_password);
+            $this->assertTrue(password_verify(LocalDemoAccountSeeder::PASSWORD, $demo->password));
+        }
     }
 
     public function test_preview_does_not_modify_accounts(): void

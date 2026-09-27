@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\User;
+use Database\Seeders\LocalDemoAccountSeeder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -19,6 +20,7 @@ class ResetClinicDemoAccounts extends Command
         $createOnly = (bool) $this->option('create-only');
         if ($createOnly && ! app()->environment(['local', 'testing'])) {
             $this->error('Create-only demo setup is restricted to local/testing environments.');
+
             return self::FAILURE;
         }
         $existing = User::whereIn('role', $roles)->get();
@@ -53,8 +55,18 @@ class ResetClinicDemoAccounts extends Command
             return self::FAILURE;
         }
 
-        $credentials = DB::transaction(function () use ($existing, $roles, $createOnly) {
-            foreach ($createOnly ? [] : $existing as $user) {
+        if ($createOnly) {
+            app(LocalDemoAccountSeeder::class)->run();
+            $this->table(['Role', 'Username', 'Password'], collect(LocalDemoAccountSeeder::ROLES)
+                ->map(fn (string $role) => [$role, 'demo_'.$role, LocalDemoAccountSeeder::PASSWORD])
+                ->all());
+            $this->info('No existing non-demo accounts or clinical records changed.');
+
+            return self::SUCCESS;
+        }
+
+        $credentials = DB::transaction(function () use ($existing, $roles) {
+            foreach ($existing as $user) {
                 $user->update(['is_active' => false, 'remember_token' => null]);
                 $user->tokens()->delete();
                 DB::table('sessions')->where('user_id', $user->id)->delete();
@@ -65,10 +77,6 @@ class ResetClinicDemoAccounts extends Command
             $credentials = [];
             foreach ($roles as $role) {
                 $username = 'demo_'.$role;
-                if ($createOnly && User::where('username', $username)->exists()) {
-                    $credentials[] = [$role, $username, '(existing account unchanged)'];
-                    continue;
-                }
                 $password = Str::random(24).'!7aA';
                 User::updateOrCreate(['username' => $username], [
                     'name' => 'Demo '.Str::headline($role),
@@ -88,7 +96,7 @@ class ResetClinicDemoAccounts extends Command
         $this->table(['Role', 'Username', 'Password (save privately)'], $credentials);
         $this->warn('These demo inboxes cannot receive mail. Normal signup and real-email recovery are unchanged.');
         $this->warn('Demo actions use the real database. Do not enter fake clinical encounters on the live site.');
-        $this->info($createOnly ? 'No existing accounts or clinical records changed. Save the new passwords privately.' : 'No patients or clinical records were deleted. Re-running rotates all demo passwords.');
+        $this->info('No patients or clinical records were deleted. Re-running rotates all demo passwords.');
 
         return self::SUCCESS;
     }

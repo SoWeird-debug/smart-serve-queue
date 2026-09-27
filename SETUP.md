@@ -38,7 +38,34 @@ npm install
 
 ## 4. Start the app locally
 
+Set up the Laravel backend first. Start MySQL in XAMPP, create a local
+`smartserve_db` database, and configure `backend/.env`. Then run:
+
 ```bash
+cd backend
+composer install
+php artisan key:generate
+php artisan migrate --seed
+php artisan serve
+```
+
+On `APP_ENV=local`, the seed creates five verified demo users without changing
+other accounts. Use one of these usernames in the login field:
+
+- `demo_administrator`
+- `demo_front_desk`
+- `demo_nurse_triage`
+- `demo_doctor`
+- `demo_pharmacy`
+
+Their local-only password is `SmartServeDemo123!`. These demo inboxes cannot
+receive verification or password-reset email. Real account verification remains
+enabled. The demo users are never created when `APP_ENV=production`.
+
+Open a second terminal in the project root:
+
+```bash
+npm ci
 npm run dev
 ```
 
