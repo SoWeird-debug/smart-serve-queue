@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
+
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -24,7 +26,12 @@ class StaffAuthApiTest extends TestCase
         ])
             ->assertCreated()
             ->assertJsonPath('user.role', 'administrator')
-            ->assertJsonStructure(['token']);
+            ->assertJsonMissingPath('token');
+
+        $this->postJson('/api/v1/staff-auth/login', [
+            'username' => 'admin', 'password' => 'SecureAdmin123!',
+        ])->assertUnprocessable();
+        User::where('username', 'admin')->update(['email_verified_at' => now(), 'must_change_password' => false]);
 
         $this->postJson('/api/v1/staff-auth/login', [
             'username' => 'admin',

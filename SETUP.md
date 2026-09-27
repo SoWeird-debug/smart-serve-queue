@@ -54,7 +54,7 @@ Before deploying, run:
 npm run build
 ```
 
-This creates the production files in `dist/`. Do not commit `node_modules/` or `dist/`; both are regenerated automatically.
+This creates the production frontend in `backend/public/index.html` and `backend/public/assets/`. Do not commit `node_modules/` or generated bundles; they are rebuilt automatically.
 
 ## Deploying updates
 
@@ -66,4 +66,10 @@ git commit -m "Describe your change"
 git push origin main
 ```
 
-When the repository is connected to Vercel, every push to `main` automatically creates a new production deployment.
+Pushing to GitHub saves source changes; it does not upload them to Hostinger. After backing up the Hostinger files and database, run this from Windows CMD:
+
+```cmd
+powershell -ExecutionPolicy Bypass -File .\DEPLOY-HOSTINGER-UNIFIED-AUTH.ps1
+```
+
+See `ACCOUNT-RELEASE.md` for deployment and verification steps. The local Vercel project link and generated OIDC token have been removed. Any existing remote Vercel Git integration is separate; disconnect it in the Vercel project settings if automatic GitHub deployments are still enabled.

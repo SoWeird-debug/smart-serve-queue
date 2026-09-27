@@ -31,6 +31,7 @@ class StaffManagementApiTest extends TestCase
         $this->postJson('/api/v1/admin/staff', [
             'name' => 'Front Desk User',
             'username' => 'frontdesk',
+            'email' => 'frontdesk@smartserve.test',
             'password' => 'SecureStaff123!',
             'password_confirmation' => 'SecureStaff123!',
             'role' => 'front_desk',
@@ -38,14 +39,13 @@ class StaffManagementApiTest extends TestCase
             'assigned_care_area_ids' => [$careAreaId],
         ])
             ->assertCreated()
-            ->assertJsonPath('data.username', 'frontdesk')
+            ->assertJsonPath('data.email', 'frontdesk@smartserve.test')
             ->assertJsonPath('data.assigned_care_area_ids.0', $careAreaId);
 
-        $this->postJson('/api/v1/staff-auth/login', [
-            'username' => 'frontdesk',
+        $this->postJson('/api/v1/auth/login', [
+            'identifier' => 'frontdesk',
             'password' => 'SecureStaff123!',
-        ])
-            ->assertOk()
-            ->assertJsonPath('user.role', 'front_desk');
+        ])->assertUnprocessable();
+        $this->assertDatabaseHas('account_email_tokens', ['email' => 'frontdesk@smartserve.test', 'purpose' => 'activation']);
     }
 }

@@ -13,6 +13,61 @@ use Illuminate\Validation\Rule;
 
 class PatientAuthController extends Controller
 {
+    public function loadDraft(Request $request): JsonResponse
+    {
+        $data = $request->validate(['email' => ['required', 'email:rfc'], 'registration_email_token' => ['required', 'string']]);
+        $pending = DB::table('pending_email_verifications')->where('email', strtolower($data['email']))
+            ->where('registration_token_hash', hash('sha256', $data['registration_email_token']))
+            ->whereNotNull('verified_at')->where('registration_expires_at', '>', now())->first();
+        abort_unless($pending, 422, 'Your registration session expired. Verify your email again.');
+        $draft = DB::table('patient_registration_drafts')->where('email', $pending->email)->where('expires_at', '>', now())->value('draft');
+
+        return response()->json(['draft' => $draft ? json_decode($draft, true) : null]);
+    }
+
+    public function saveDraft(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email:rfc', 'max:255'],
+            'registration_email_token' => ['required', 'string'],
+            'draft' => ['required', 'array'],
+        ]);
+
+        $email = strtolower($data['email']);
+        $pending = DB::table('pending_email_verifications')
+            ->where('email', $email)
+            ->where('registration_token_hash', hash('sha256', $data['registration_email_token']))
+            ->whereNotNull('verified_at')
+            ->where('registration_expires_at', '>=', now())
+            ->first();
+
+        if (! $pending) {
+            return response()->json(['message' => 'Confirm your email address before saving a registration draft.'], 422);
+        }
+
+        // Passwords and consent are deliberately never persisted in a draft.
+        $draft = collect($data['draft'])->only([
+            'familyName', 'givenName', 'middleName', 'suffix', 'dob', 'gender', 'civilStatus',
+            'nationality', 'preferredLanguage', 'mobile', 'alternateContact', 'addressLine',
+            'barangay', 'municipality', 'province', 'postalCode', 'philHealthClientType',
+            'philHealthPin', 'philHealthMemberName', 'philHealthMemberPin', 'guardianName',
+            'guardianRelationship', 'guardianContact', 'emergencyContactName',
+            'emergencyContactRelationship', 'emergencyContactPhone',
+        ])->filter(fn ($value) => is_string($value) && strlen($value) <= 255)->all();
+        DB::table('patient_registration_drafts')->updateOrInsert(
+            ['email' => $email],
+            [
+                'registration_token_hash' => hash('sha256', $data['registration_email_token']),
+                'draft' => json_encode($draft),
+                'expires_at' => $pending->registration_expires_at,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        );
+
+        return response()->json(['message' => 'Registration draft saved.']);
+    }
+
     public function register(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -21,14 +76,15 @@ class PatientAuthController extends Controller
             'middle_name' => ['nullable', 'string', 'max:100'],
             'suffix' => ['nullable', 'string', 'max:24'],
             'date_of_birth' => ['required', 'date', 'before:today'],
-            'sex' => ['required', Rule::in(['male', 'female', 'other'])],
+            'sex' => ['required', Rule::in(['male', 'female'])],
             'civil_status' => ['nullable', 'string', 'max:32'],
             'nationality' => ['nullable', 'string', 'max:80'],
             'preferred_language' => ['nullable', 'string', 'max:80'],
-            'mobile_number' => ['required', 'string', 'max:32', 'unique:patient_profiles,mobile_number'],
+            'mobile_number' => ['required', 'regex:/^09[0-9]{9}$/', 'unique:patient_profiles,mobile_number'],
             'alternate_contact' => ['nullable', 'string', 'max:32'],
             'email' => ['required', 'email:rfc', 'max:255', 'unique:users,email'],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'registration_email_token' => ['required', 'string'],
+            'password' => ['required', 'string', 'min:12', 'max:128', 'confirmed'],
             'barangay_id' => ['required', 'integer', 'exists:barangays,id'],
             'address_line' => ['required', 'string', 'max:255'],
             'latitude' => ['nullable', 'numeric', 'between:-90,90'],
@@ -39,9 +95,9 @@ class PatientAuthController extends Controller
             'consent_to_treatment' => ['accepted'],
             'privacy_acknowledged' => ['accepted'],
             'philhealth_client_type' => ['nullable', 'string', 'max:24'],
-            'philhealth_pin' => ['nullable', 'string', 'max:48'],
+            'philhealth_pin' => ['nullable', 'regex:/^[0-9]{12}$/'],
             'philhealth_member_name' => ['nullable', 'string', 'max:255'],
-            'philhealth_member_pin' => ['nullable', 'string', 'max:48'],
+            'philhealth_member_pin' => ['nullable', 'regex:/^[0-9]{12}$/'],
             'guardian_name' => ['nullable', 'string', 'max:255'],
             'guardian_relationship' => ['nullable', 'string', 'max:80'],
             'guardian_contact' => ['nullable', 'string', 'max:32'],
@@ -50,10 +106,24 @@ class PatientAuthController extends Controller
             'emergency_contact_phone' => ['nullable', 'string', 'max:32'],
         ]);
 
-        [$user, $profile] = DB::transaction(function () use ($data): array {
+        $email = strtolower($data['email']);
+        $pending = DB::table('pending_email_verifications')
+            ->where('email', $email)
+            ->where('registration_token_hash', hash('sha256', $data['registration_email_token']))
+            ->whereNotNull('verified_at')
+            ->where('registration_expires_at', '>=', now())
+            ->first();
+        if (! $pending) {
+            return response()->json(['message' => 'Confirm your email address before completing registration.'], 422);
+        }
+
+        [$user, $profile] = DB::transaction(function () use ($data, $email, $pending): array {
+            $verified = DB::table('pending_email_verifications')->lockForUpdate()->find($pending->id);
+            abort_unless($verified && $verified->registration_token_hash === $pending->registration_token_hash, 422, 'This registration link has already been used.');
             $user = User::create([
                 'name' => trim($data['given_name'].' '.$data['family_name']),
-                'email' => strtolower($data['email']),
+                'email' => $email,
+                'email_verified_at' => now(),
                 'password' => $data['password'],
                 'role' => 'patient',
                 'is_active' => true,
@@ -99,14 +169,16 @@ class PatientAuthController extends Controller
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+            DB::table('pending_email_verifications')->where('id', $pending->id)->delete();
+            DB::table('patient_registration_drafts')->where('email', $email)->delete();
 
             return [$user, $profile];
         });
 
         return response()->json([
-            'token' => $user->createToken('patient portal', ['patient'])->plainTextToken,
+            'message' => 'You successfully registered. Please sign in.',
             'patient' => $this->patientPayload($profile, $user),
-            'email_verification_required' => true,
+            'email_verification_required' => ! $user->hasVerifiedEmail(),
         ], 201);
     }
 
@@ -117,13 +189,16 @@ class PatientAuthController extends Controller
             'password' => ['required', 'string'],
         ]);
         $profile = PatientProfile::query()
-            ->where('patient_number', $data['identifier'])
-            ->orWhere('mobile_number', $data['identifier'])
+            ->whereHas('user', fn ($query) => $query->where('email', strtolower(trim($data['identifier']))))
             ->with('user')
             ->first();
 
         if (! $profile || ! $profile->user || ! $profile->user->is_active || ! Hash::check($data['password'], $profile->user->password)) {
             return response()->json(['message' => 'Invalid patient number/mobile number or password.'], 422);
+        }
+
+        if (! $profile->user->hasVerifiedEmail() || $profile->user->must_change_password) {
+            return response()->json(['message' => 'Verify your email through patient sign up to activate your onsite account.'], 422);
         }
 
         $profile->user->tokens()->where('name', 'patient portal')->delete();
@@ -201,17 +276,20 @@ class PatientAuthController extends Controller
         /** @var User $user */
         $user = $request->user();
         $data = $request->validate([
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'string', 'min:12', 'max:128', 'confirmed'],
         ]);
+        abort_unless(Hash::check($data['current_password'], $user->password), 422, 'Your current password is incorrect.');
         $user->forceFill([
             'password' => $data['password'],
             'must_change_password' => false,
         ])->save();
+        $user->tokens()->delete();
 
         return response()->json(status: 204);
     }
 
-    private function patientPayload(PatientProfile $profile, User $user): array
+    public function patientPayload(PatientProfile $profile, User $user): array
     {
         $address = DB::table('patient_addresses')
             ->join('barangays', 'barangays.id', '=', 'patient_addresses.barangay_id')
@@ -226,6 +304,7 @@ class PatientAuthController extends Controller
                 'municipalities.name as municipality_name', 'municipalities.postal_code',
                 'provinces.name as province_name',
             ]);
+
         return [
             'id' => $profile->id,
             'patient_number' => $profile->patient_number,

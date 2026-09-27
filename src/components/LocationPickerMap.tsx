@@ -113,7 +113,8 @@ export function LocationPickerMap({
   };
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-border">
+    // Keep Leaflet panes and controls below page-level dialogs and their overlays.
+    <div className="relative isolate z-0 overflow-hidden rounded-2xl border border-border">
       <MapContainer
         center={JONES_CENTER}
         zoom={14}

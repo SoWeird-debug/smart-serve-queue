@@ -38,7 +38,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export type ApiStaffUser = {
   id: number;
   name: string;
-  username: string;
+  username?: string;
   email: string | null;
   role: "front_desk" | "nurse_triage" | "doctor" | "pharmacy" | "administrator";
   assigned_care_areas: Array<number | string>;
@@ -48,8 +48,9 @@ export type ApiStaffUser = {
 export type ApiManagedStaffUser = {
   id: number;
   name: string;
-  username: string;
+  username?: string;
   email: string | null;
+  email_verified_at: string | null;
   role: "front_desk" | "nurse_triage" | "doctor" | "pharmacy" | "administrator";
   is_active: boolean;
   must_change_password: boolean;
@@ -60,6 +61,7 @@ export type ApiManagedStaffUser = {
 export type ApiCareArea = { id: number; name: string; building: string | null };
 
 type StaffAuthResponse = { token: string; user: ApiStaffUser };
+type UnifiedAuthResponse = { token: string; role: ApiStaffUser["role"] | "patient" };
 
 export type ApiPatient = {
   id: number;
@@ -77,6 +79,7 @@ export type ApiPatient = {
   alternate_contact: string | null;
   email: string | null;
   email_verified_at: string | null;
+  philhealth_pin?: string | null;
   guardian_name: string | null;
   guardian_relationship: string | null;
   guardian_contact: string | null;
@@ -186,6 +189,52 @@ export const loginStaff = (username: string, password: string) =>
     body: JSON.stringify({ username, password }),
   });
 
+export const unifiedLogin = (identifier: string, password: string) =>
+  request<UnifiedAuthResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ identifier, password }),
+  });
+
+export const sendRegistrationVerification = (email: string) =>
+  request<{ message: string }>("/auth/registration/send-verification", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+
+export const savePatientRegistrationDraft = (payload: {
+  email: string;
+  registration_email_token: string;
+  draft: Record<string, unknown>;
+}) => request<{ message: string }>("/patient-auth/registration-draft", {
+  method: "POST",
+  body: JSON.stringify(payload),
+});
+
+export const sendPasswordReset = (identifier: string) =>
+  request<{ message: string }>("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ identifier }),
+  });
+
+export const claimOnsiteAccount = (payload: { email: string; registration_email_token: string; temporary_password: string; password: string; password_confirmation: string; consent_to_treatment: boolean; privacy_acknowledged: boolean; profile?: Partial<ApiPatient> }) => request<{ message: string }>("/auth/claim-onsite-account", { method: "POST", body: JSON.stringify(payload) });
+export const reviewOnsiteAccount = (payload: { email: string; registration_email_token: string; temporary_password: string }) => request<{ patient: ApiPatient }>("/auth/onsite-review", { method: "POST", body: JSON.stringify(payload) });
+export const loadRegistrationDraft = (email: string, registration_email_token: string) => request<{ draft: Record<string, string> | null }>("/patient-auth/registration-draft/load", { method: "POST", body: JSON.stringify({ email, registration_email_token }) });
+export type AccountProfile = { id: number; name: string; username: string; email: string; role: string; pending_email: string | null; email_verified_at: string | null };
+export type EmailReview = { name: string; username: string; email: string; role: string; purpose: "activation" | "email_change" };
+export const getAccountProfile = () => request<{ user: AccountProfile }>("/account/profile");
+export const updateAccountProfile = (payload: { name: string; email: string; current_password: string }) => request<{ user: AccountProfile; message: string }>("/account/profile", { method: "PATCH", body: JSON.stringify(payload) });
+export const updateAccountPassword = (payload: { current_password: string; password: string; password_confirmation: string }) => request<{ message: string }>("/account/password", { method: "POST", body: JSON.stringify(payload) });
+export const logoutAccount = () => request<void>("/account/logout", { method: "POST" });
+export const resendActivation = (identifier: string) => request<{ message: string }>("/auth/activation/resend", { method: "POST", body: JSON.stringify({ identifier }) });
+export const inspectAccountEmail = (token: string) => request<EmailReview>("/auth/email/inspect", { method: "POST", body: JSON.stringify({ token }) });
+export const confirmAccountEmail = (payload: { token: string; password?: string; password_confirmation?: string }) => request<{ message: string; username: string }>("/auth/email/confirm", { method: "POST", body: JSON.stringify(payload) });
+
+export const resetPasswordByEmail = (payload: { email: string; token: string; password: string; password_confirmation: string }) =>
+  request<{ message: string }>("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
 export const adminStaff = () => request<{ data: ApiManagedStaffUser[] }>("/admin/staff");
 
 export const adminCareAreas = () => request<{ data: ApiCareArea[] }>("/directories/care-areas");
@@ -207,7 +256,7 @@ export const createAdminStaff = (payload: {
 
 export const updateAdminStaff = (staffId: number, payload: Partial<{
   name: string;
-  username: string;
+  username?: string;
   email: string | null;
   role: ApiManagedStaffUser["role"];
   is_active: boolean;
@@ -231,12 +280,15 @@ export const patientLogin = (identifier: string, password: string) =>
   });
 
 export const patientRegister = (payload: Record<string, unknown>) =>
-  request<PatientAuthResponse>("/patient-auth/register", {
+  request<{ patient: ApiPatient; message: string; email_verification_required: boolean }>("/patient-auth/register", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 
 export const patientAppointments = () => request<{ data: ApiAppointment[] }>("/appointments");
+
+export const patientCurrent = () => request<{ patient: ApiPatient }>("/patient-auth/me");
+export const staffCurrent = () => request<{ user: ApiStaffUser }>("/staff-auth/me");
 
 export const createPatientAppointment = (serviceId: number, appointmentDate: string) =>
   request<{ data: ApiAppointment }>("/appointments", {

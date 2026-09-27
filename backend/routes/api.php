@@ -1,16 +1,19 @@
 <?php
 
-use App\Http\Controllers\Api\PatientAuthController;
-use App\Http\Controllers\Api\DirectoryController;
-use App\Http\Controllers\Api\StaffAuthController;
-use App\Http\Controllers\Api\AppointmentController;
-use App\Http\Controllers\Api\StaffQueueController;
-use App\Http\Controllers\Api\PublicQueueBoardController;
-use App\Http\Controllers\Api\TriageController;
-use App\Http\Controllers\Api\ConsultationController;
-use App\Http\Controllers\Api\InventoryController;
+use App\Http\Controllers\Api\AccountAccessController;
+use App\Http\Controllers\Api\AccountProfileController;
 use App\Http\Controllers\Api\AdministrationController;
+use App\Http\Controllers\Api\AppointmentController;
+use App\Http\Controllers\Api\ConsultationController;
+use App\Http\Controllers\Api\DirectoryController;
+use App\Http\Controllers\Api\InventoryController;
+use App\Http\Controllers\Api\PatientAuthController;
+use App\Http\Controllers\Api\PublicQueueBoardController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\StaffAuthController;
+use App\Http\Controllers\Api\StaffQueueController;
+use App\Http\Controllers\Api\TriageController;
+use App\Http\Middleware\ActiveVerifiedAccount;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -20,7 +23,19 @@ Route::prefix('v1')->group(function (): void {
     ]));
 
     Route::post('/patient-auth/register', [PatientAuthController::class, 'register'])->middleware('throttle:6,1');
+    Route::post('/patient-auth/registration-draft', [PatientAuthController::class, 'saveDraft'])->middleware('throttle:12,1');
     Route::post('/patient-auth/login', [PatientAuthController::class, 'login'])->middleware('throttle:10,1');
+    Route::post('/auth/login', [AccountAccessController::class, 'login'])->middleware('throttle:10,1');
+    Route::post('/auth/registration/send-verification', [AccountAccessController::class, 'sendRegistrationVerification'])->middleware('throttle:3,1');
+    Route::get('/auth/registration/verify', [AccountAccessController::class, 'verifyRegistrationEmail'])->middleware('throttle:10,1');
+    Route::post('/auth/forgot-password', [AccountAccessController::class, 'sendPasswordReset'])->middleware('throttle:3,1');
+    Route::post('/auth/reset-password', [AccountAccessController::class, 'resetPassword'])->middleware('throttle:5,1');
+    Route::post('/auth/claim-onsite-account', [AccountAccessController::class, 'claimOnsiteAccount'])->middleware('throttle:5,1');
+    Route::post('/auth/onsite-review', [AccountAccessController::class, 'onsiteReview'])->middleware('throttle:5,1');
+    Route::post('/auth/activation/resend', [AccountProfileController::class, 'resend'])->middleware('throttle:3,1');
+    Route::post('/auth/email/inspect', [AccountProfileController::class, 'inspect'])->middleware('throttle:10,1');
+    Route::post('/auth/email/confirm', [AccountProfileController::class, 'confirm'])->middleware('throttle:5,1');
+    Route::post('/patient-auth/registration-draft/load', [PatientAuthController::class, 'loadDraft'])->middleware('throttle:12,1');
     Route::get('/staff-auth/setup-status', [StaffAuthController::class, 'setupStatus'])->middleware('throttle:30,1');
     Route::post('/staff-auth/setup-administrator', [StaffAuthController::class, 'setupAdministrator'])->middleware('throttle:3,1');
     Route::post('/staff-auth/login', [StaffAuthController::class, 'login'])->middleware('throttle:10,1');
@@ -29,7 +44,11 @@ Route::prefix('v1')->group(function (): void {
     Route::get('/directories/care-areas', [DirectoryController::class, 'careAreas']);
     Route::get('/services', [DirectoryController::class, 'services']);
     Route::get('/public/queue-board/{board}', [PublicQueueBoardController::class, 'show'])->middleware('throttle:120,1');
-    Route::middleware('auth:sanctum')->group(function (): void {
+    Route::middleware(['auth:sanctum', ActiveVerifiedAccount::class])->group(function (): void {
+        Route::get('/account/profile', [AccountProfileController::class, 'show']);
+        Route::patch('/account/profile', [AccountProfileController::class, 'update'])->middleware('throttle:5,1');
+        Route::post('/account/password', [AccountProfileController::class, 'password'])->middleware('throttle:5,1');
+        Route::post('/account/logout', [AccountProfileController::class, 'logout']);
         Route::get('/patient-auth/me', [PatientAuthController::class, 'current']);
         Route::post('/patient-auth/logout', [PatientAuthController::class, 'logout']);
         Route::patch('/patient-auth/profile', [PatientAuthController::class, 'updateProfile']);

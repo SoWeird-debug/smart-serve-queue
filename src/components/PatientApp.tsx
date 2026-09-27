@@ -71,6 +71,9 @@ import {
   patientLogin,
   patientAppointments,
   patientRegister,
+  savePatientRegistrationDraft,
+  loadRegistrationDraft,
+  logoutAccount,
   setApiAccessToken,
 } from "@/lib/api";
 
@@ -169,27 +172,35 @@ type Screen =
   | "notif"
   | "profile";
 
-export function PatientApp() {
-  const [patientId, setPatientId] = useState<string | null>(null);
-  const [remotePatient, setRemotePatient] = useState<Patient | null>(null);
+export function PatientApp({
+  initialPatient,
+  registrationEmail,
+  registrationToken,
+  onExit,
+  onRegistrationComplete,
+}: {
+  initialPatient?: ApiPatient;
+  registrationEmail?: string;
+  registrationToken?: string;
+  onExit?: () => void;
+  onRegistrationComplete?: () => void;
+}) {
+  const initialPortalPatient = initialPatient ? patientFromApi(initialPatient) : null;
+  const [patientId, setPatientId] = useState<string | null>(initialPortalPatient?.id || null);
+  const [remotePatient, setRemotePatient] = useState<Patient | null>(initialPortalPatient);
   const [remoteServices, setRemoteServices] = useState<Service[]>([]);
   const [remoteAppointments, setRemoteAppointments] = useState<ApiAppointment[]>([]);
-  const [screen, setScreen] = useState<Screen>("login");
+  const [screen, setScreen] = useState<Screen>(registrationEmail && registrationToken ? "register" : initialPortalPatient ? "home" : "login");
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<number>(
     new Date().getDate() + 1,
   );
-  const [securitySetupPatientId, setSecuritySetupPatientId] = useState<string | null>(null);
   const {
     patients,
     services,
     bookAppointment,
     registerPortalPatient,
     loginPatient,
-    needsPatientPasswordChange,
-    requestPatientEmailVerification,
-    confirmPatientEmailVerification,
-    changePatientPortalPassword,
     updatePatient,
     notifications,
     markNotificationRead,
@@ -207,54 +218,29 @@ export function PatientApp() {
     if (patientId && !me) {
       setPatientId(null);
       setRemotePatient(null);
-      setScreen("login");
+      onExit?.();
     }
-  }, [me, patientId]);
-  useEffect(() => {
-    if (patientId && needsPatientPasswordChange(patientId)) {
-      setSecuritySetupPatientId(patientId);
-    }
-  }, [patientId, needsPatientPasswordChange]);
+  }, [me, onExit, patientId]);
   const authenticate = (patient: Patient) => {
     setPatientId(patient.id);
     setRemotePatient(patient);
     setScreen("home");
-    setSecuritySetupPatientId(null);
     void refreshAppointments().catch(() => setRemoteAppointments([]));
   };
-  const signOut = () => {
+  const signOut = async () => {
+    try { await logoutAccount(); } catch { /* Expired sessions still clear local access. */ }
     setApiAccessToken(null);
     setPatientId(null);
     setRemotePatient(null);
     setRemoteAppointments([]);
-    setScreen("login");
+    onExit?.();
   };
   const openServices = () => setScreen("services");
   const navigate = (next: Screen) => setScreen(next);
 
   return (
-    <div className="flex flex-col items-center gap-6">
-      <div className="text-center max-w-xl">
-        <Badge
-          variant="secondary"
-          className="mb-2 bg-primary-soft text-primary border-0"
-        >
-          Patient Mobile App
-        </Badge>
-        <h2 className="text-2xl md:text-3xl font-display font-bold">
-          Book, queue, and track visits — from your phone
-        </h2>
-        <p className="text-muted-foreground text-sm mt-1">
-          A walkthrough of the patient-facing experience.
-        </p>
-      </div>
-
-      <div className="phone-frame">
-        {/* notch */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-foreground/90 rounded-b-2xl z-20" />
-        <div
-          className={`patient-mobile-scroll h-full overflow-y-auto pb-24 ${screen === "login" ? "bg-gradient-hero" : "bg-background"}`}
-        >
+    <div className={`relative flex h-dvh min-h-0 flex-col overflow-hidden ${screen === "login" || screen === "register" ? "bg-gradient-hero" : "bg-background"}`}>
+      <div key={screen} className="patient-mobile-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {screen === "login" && (
             <LoginScreen
               onAuthenticated={authenticate}
@@ -263,8 +249,10 @@ export function PatientApp() {
           )}
           {screen === "register" && (
             <OnlineRegistrationWizard
-              onAuthenticated={authenticate}
-              onBack={() => setScreen("login")}
+              onRegistrationComplete={onRegistrationComplete || onExit || (() => setScreen("login"))}
+              onBack={onExit || (() => setScreen("login"))}
+              verifiedEmail={registrationEmail || ""}
+              registrationToken={registrationToken || ""}
             />
           )}
           {screen === "verifyLocation" && me && (
@@ -359,158 +347,19 @@ export function PatientApp() {
               onSignOut={signOut}
             />
           )}
-        </div>
+      </div>
 
-        {screen !== "login" &&
+      {screen !== "login" &&
           screen !== "register" &&
           screen !== "verifyLocation" && (
           <BottomNav screen={screen} setScreen={navigate} />
-        )}
-      </div>
-      <FirstLoginSecurityDialog
-        patient={patients.find((patient) => patient.id === securitySetupPatientId) || null}
-        open={Boolean(securitySetupPatientId)}
-        requestVerification={requestPatientEmailVerification}
-        confirmVerification={confirmPatientEmailVerification}
-        changePassword={changePatientPortalPassword}
-        onComplete={() => setSecuritySetupPatientId(null)}
-      />
+      )}
     </div>
   );
 }
 
 /* ---------------- screens ---------------- */
 
-function FirstLoginSecurityDialog({
-  patient,
-  open,
-  requestVerification,
-  confirmVerification,
-  changePassword,
-  onComplete,
-}: {
-  patient: Patient | null;
-  open: boolean;
-  requestVerification: (patientId: string, email: string) => boolean;
-  confirmVerification: (patientId: string) => boolean;
-  changePassword: (patientId: string, password: string) => boolean;
-  onComplete: () => void;
-}) {
-  const [email, setEmail] = useState(patient?.email || "");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    setEmail(patient?.email || "");
-    setPassword("");
-    setConfirmPassword("");
-    setMessage("");
-    setError("");
-  }, [patient?.id]);
-  if (!patient) return null;
-  const emailVerified = Boolean(patient.emailVerifiedAt);
-  const verificationRequested = Boolean(patient.emailVerificationRequestedAt);
-  const request = () => {
-    if (!requestVerification(patient.id, email)) {
-      setError("Enter a valid Gmail address before requesting verification.");
-      return;
-    }
-    setError("");
-    setMessage(`A verification link was sent to ${email.trim()}.`);
-  };
-  const confirm = () => {
-    if (!confirmVerification(patient.id)) {
-      setError("Request an email verification link first.");
-      return;
-    }
-    setError("");
-    setMessage("Email verified. You can now create your new password.");
-  };
-  const savePassword = () => {
-    if (password.length < 8) {
-      setError("Create a password with at least 8 characters.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("The passwords do not match.");
-      return;
-    }
-    if (!changePassword(patient.id, password)) {
-      setError("Verify the email first before creating a password.");
-      return;
-    }
-    onComplete();
-  };
-  return (
-    <Dialog open={open} onOpenChange={() => undefined}>
-      <DialogContent className="max-w-md rounded-2xl" showClose={false}>
-        <DialogHeader>
-          <div className="mb-2 grid h-11 w-11 place-items-center rounded-2xl bg-primary-soft text-primary">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
-          <DialogTitle className="font-display text-xl">Secure your patient account</DialogTitle>
-          <DialogDescription>
-            Before continuing, verify your email and replace the temporary onsite password.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="rounded-xl bg-muted/60 p-3 text-sm">
-            <span className="text-muted-foreground">Patient number</span>
-            <p className="font-semibold">{patient.patientNumber || "Patient number pending"}</p>
-          </div>
-          {!emailVerified ? (
-            <>
-              <div>
-                <Label htmlFor="first-login-email">Gmail address</Label>
-                <Input
-                  id="first-login-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="name@gmail.com"
-                  className="mt-1"
-                />
-              </div>
-              <Button type="button" variant="outline" className="w-full" onClick={request}>
-                <Mail className="mr-2 h-4 w-4" />
-                {verificationRequested ? "Resend verification email" : "Verify Gmail"}
-              </Button>
-              {verificationRequested ? (
-                <Button type="button" className="w-full" onClick={confirm}>
-                  <ShieldCheck className="mr-2 h-4 w-4" />
-                  I verified my Gmail
-                </Button>
-              ) : null}
-              <p className="text-xs leading-5 text-muted-foreground">
-                Prototype notice: this confirms the verification step locally. Laravel will send a real, single-use verification link to this address.
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="rounded-xl border border-secondary/25 bg-secondary-soft px-3 py-2 text-sm text-secondary-foreground">
-                Gmail verified. Create a new password for future sign-ins.
-              </div>
-              <div>
-                <Label htmlFor="first-login-password">New password</Label>
-                <Input id="first-login-password" className="mt-1" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" />
-              </div>
-              <div>
-                <Label htmlFor="first-login-confirm-password">Confirm new password</Label>
-                <Input id="first-login-confirm-password" className="mt-1" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
-              </div>
-              <Button type="button" className="w-full" onClick={savePassword}>
-                <KeyRound className="mr-2 h-4 w-4" />Save new password
-              </Button>
-            </>
-          )}
-          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-          {message ? <p role="status" className="text-sm text-secondary-foreground">{message}</p> : null}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function LoginScreen({
   onAuthenticated,
@@ -752,14 +601,14 @@ function LoginScreen({
             )}
             <div>
               <Label className="text-xs">
-                {mode === "login" ? "Patient number or mobile number" : "Mobile number"}
+                {mode === "login" ? "Patient email" : "Mobile number"}
               </Label>
               <Input
                 value={form.mobile}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, mobile: e.target.value }))
                 }
-                placeholder={mode === "login" ? "PT-000001 or +63 9XX XXX XXXX" : "+63 9XX XXX XXXX"}
+                placeholder={mode === "login" ? "you@example.com" : "09XXXXXXXXX"}
                 className="rounded-xl"
               />
             </div>
@@ -778,7 +627,7 @@ function LoginScreen({
             {mode === "login" && (
               <>
                 <p className="rounded-xl border border-primary/15 bg-primary-soft px-3 py-2 text-xs text-primary">
-                  Registered onsite? Sign in with the patient number given by the clinic and the temporary password.
+                  Registered onsite? Verify your email through patient sign up, review your information, and choose your personal password before signing in.
                 </p>
                 <label className="flex items-start gap-2 rounded-xl bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
                   <input
@@ -817,7 +666,7 @@ function LoginScreen({
   );
 }
 
-type OnlineRegistrationStep = 1 | 2 | 3 | 4;
+type OnlineRegistrationStep = 1 | 2 | 3 | 4 | 5;
 
 function PortalInput({
   id,
@@ -863,18 +712,22 @@ function PortalInput({
               : event.target.value,
           )
         }
-        className="rounded-xl"
+        className={cn("rounded-xl", required && "border-destructive/35 focus-visible:ring-destructive/30")}
       />
     </div>
   );
 }
 
 function OnlineRegistrationWizard({
-  onAuthenticated,
+  onRegistrationComplete,
   onBack,
+  verifiedEmail,
+  registrationToken,
 }: {
-  onAuthenticated: (patient: Patient) => void;
+  onRegistrationComplete: () => void;
   onBack: () => void;
+  verifiedEmail: string;
+  registrationToken: string;
 }) {
   const [step, setStep] = useState<OnlineRegistrationStep>(1);
   const [form, setForm] = useState({
@@ -889,7 +742,7 @@ function OnlineRegistrationWizard({
     preferredLanguage: "Filipino",
     mobile: "",
     alternateContact: "",
-    email: "",
+    email: verifiedEmail,
     addressLine: "",
     barangay: "",
     municipality: "Jones",
@@ -913,6 +766,16 @@ function OnlineRegistrationWizard({
   });
   const [error, setError] = useState("");
   const [municipalityBarangays, setMunicipalityBarangays] = useState<string[]>(() => barangaysForMunicipality("Jones"));
+  const [saving, setSaving] = useState(false);
+  const [draftLoading, setDraftLoading] = useState(true);
+  useEffect(() => {
+    let active = true;
+    void loadRegistrationDraft(verifiedEmail, registrationToken).then(({ draft }) => {
+      if (active && draft) setForm((current) => ({ ...current, ...draft, email: verifiedEmail, password: "", consentToTreatment: false, privacyAcknowledged: false }));
+    }).catch((failure) => { if (active) setError(failure.message); })
+      .finally(() => { if (active) setDraftLoading(false); });
+    return () => { active = false; };
+  }, [verifiedEmail, registrationToken]);
   const [barangayDirectoryLoading, setBarangayDirectoryLoading] = useState(false);
   useEffect(() => {
     let active = true;
@@ -963,13 +826,15 @@ function OnlineRegistrationWizard({
         !form.postalCode)
     )
       return "Complete your mobile number and full residence address.";
+    if (step === 2 && !/^09\d{9}$/.test(form.mobile))
+      return "Enter an 11-digit Philippine mobile number starting with 09.";
     if (step === 2 && !isSupportedServiceArea(form))
       return "Online registration is available only to residents of Jones or Santiago City, Isabela.";
     if (
       step === 3 &&
-      ((form.philHealthClientType !== "Not enrolled" && !form.philHealthPin) ||
+      ((form.philHealthClientType !== "Not enrolled" && !/^\d{12}$/.test(form.philHealthPin)) ||
         (form.philHealthClientType === "Dependent" &&
-          (!form.philHealthMemberName || !form.philHealthMemberPin)) ||
+          (!form.philHealthMemberName || !/^\d{12}$/.test(form.philHealthMemberPin))) ||
         (needsGuardian &&
           (!form.guardianName ||
             !form.guardianRelationship ||
@@ -978,45 +843,60 @@ function OnlineRegistrationWizard({
       return needsGuardian
         ? "Add the required guardian information and any applicable PhilHealth details."
         : "Complete the PhilHealth details for the selected client type.";
-    if (step === 4) {
+    if (step === 5) {
       if (
         !form.privacyAcknowledged ||
         !form.email ||
         !form.consentToTreatment ||
-        form.password.length < 8
+        form.password.length < 12
       )
-        return "Enter an email, create a password of at least 8 characters, acknowledge the Privacy Notice, and confirm consent to treatment.";
+        return "Create a password of at least 12 characters, acknowledge the Privacy Notice, and confirm consent to treatment.";
     }
     return "";
   };
-  const next = () => {
-    const problem = stepProblem();
-    if (problem) {
-      setError(problem);
-      return;
-    }
-    setError("");
-    setStep((current) => Math.min(4, current + 1) as OnlineRegistrationStep);
-  };
-  const submit = async () => {
+  const next = async () => {
+    if (saving || draftLoading) return;
     const problem = stepProblem();
     if (problem) {
       setError(problem);
       return;
     }
     try {
+      setSaving(true);
+      await savePatientRegistrationDraft({
+        email: form.email,
+        registration_email_token: registrationToken,
+        draft: form,
+      });
+      setError("");
+      setStep((current) => Math.min(5, current + 1) as OnlineRegistrationStep);
+    } catch (requestError) {
+      setError(requestError instanceof ApiError ? requestError.message : "Your draft could not be saved. Check your connection and try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const submit = async () => {
+    if (saving || draftLoading) return;
+    const problem = stepProblem();
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    try {
+      setSaving(true);
       const municipalities = await apiMunicipalities();
       const municipality = municipalities.data.find((item) => item.name === form.municipality);
       if (!municipality) throw new ApiError("Selected municipality is not available in the clinic directory.", 422);
       const barangays = await apiBarangays(municipality.id);
       const barangay = barangays.data.find((item) => item.name === form.barangay);
       if (!barangay) throw new ApiError("Selected barangay is not available for this municipality.", 422);
-      const result = await patientRegister({
+      await patientRegister({
         given_name: form.givenName, family_name: form.familyName, middle_name: form.middleName || null,
         suffix: form.suffix || null, date_of_birth: form.dob, sex: form.gender.toLowerCase(),
         civil_status: form.civilStatus || null, nationality: form.nationality || null,
         preferred_language: form.preferredLanguage || null, mobile_number: form.mobile,
-        alternate_contact: form.alternateContact || null, email: form.email, password: form.password,
+        alternate_contact: form.alternateContact || null, email: form.email, registration_email_token: registrationToken, password: form.password,
         password_confirmation: form.password, barangay_id: barangay.id, address_line: form.addressLine,
         consent_to_treatment: form.consentToTreatment, privacy_acknowledged: form.privacyAcknowledged,
         philhealth_client_type: form.philHealthClientType, philhealth_pin: form.philHealthPin || null,
@@ -1025,42 +905,31 @@ function OnlineRegistrationWizard({
         guardian_contact: form.guardianContact || null, emergency_contact_name: form.emergencyContactName || null,
         emergency_contact_relationship: form.emergencyContactRelationship || null, emergency_contact_phone: form.emergencyContactPhone || null,
       });
-      setApiAccessToken(result.token);
-      onAuthenticated(patientFromApi(result.patient));
+      setApiAccessToken(null);
+      onRegistrationComplete?.();
     } catch (requestError) {
       setError(requestError instanceof ApiError ? requestError.message : "Registration could not be saved to the SmartServe server.");
+    } finally {
+      setSaving(false);
     }
   };
   const steps = [
     ["Identity", "Your legal patient details"],
     ["Contact", "Contact and residence"],
     ["Coverage", "PhilHealth and guardian"],
+    ["Review", "Review your information"],
     ["Consent", "Consent and account"],
   ] as const;
   return (
-    <div className="min-h-full bg-gradient-hero p-5 pt-12 text-primary-foreground">
-      <div className="mb-6 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="grid h-10 w-10 place-items-center rounded-xl bg-card/15 backdrop-blur"
-          aria-label="Back to sign in"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
+    <div className="min-h-full bg-gradient-hero text-primary-foreground">
+      <div className="sticky top-0 z-20 bg-gradient-hero px-5 pb-3 pt-5 shadow-sm">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-foreground/70">
             Clinic registration
           </p>
-          <h1 className="font-display text-2xl font-bold">
-            Create your patient record
-          </h1>
-          <p className="mt-1 text-[11px] text-primary-foreground/75">
-            The same patient profile standard used by clinic staff.
-          </p>
+          <h1 className="font-display text-xl font-bold">Super Health Center</h1>
         </div>
-      </div>
-      <div className="mb-5 grid grid-cols-4 gap-1.5">
+      <div className="mt-3 grid grid-cols-5 gap-1.5">
         {steps.map(([label], index) => {
           const active = index + 1 <= step;
           return (
@@ -1077,10 +946,10 @@ function OnlineRegistrationWizard({
             </div>
           );
         })}
-      </div>
-      <div className="rounded-3xl bg-card p-5 text-card-foreground shadow-card">
+      </div></div>
+      <div className="mx-3 mb-3 rounded-3xl bg-card p-5 text-card-foreground shadow-card">
         <div className="mb-5">
-          <p className="text-xs font-semibold text-primary">Step {step} of 4</p>
+          <p className="text-xs font-semibold text-primary">Step {step} of 5</p>
           <h2 className="font-display text-xl font-bold">
             {steps[step - 1][0]}
           </h2>
@@ -1143,7 +1012,6 @@ function OnlineRegistrationWizard({
                 <option value="" disabled>Select sex</option>
                 <option>Female</option>
                 <option>Male</option>
-                <option>Other</option>
               </select>
             </div>
             <div>
@@ -1191,9 +1059,10 @@ function OnlineRegistrationWizard({
               label="Mobile number"
               required
               inputMode="tel"
+              maxLength={11}
               value={form.mobile}
               onChange={(value) => set("mobile", value)}
-              placeholder="+63 9XX XXX XXXX"
+              placeholder="09XXXXXXXXX"
             />
             <PortalInput
               id="online-alternate-mobile"
@@ -1201,14 +1070,6 @@ function OnlineRegistrationWizard({
               inputMode="tel"
               value={form.alternateContact}
               onChange={(value) => set("alternateContact", value)}
-            />
-            <PortalInput
-              id="online-email"
-              label="Email address"
-              type="email"
-              inputMode="email"
-              value={form.email}
-              onChange={(value) => set("email", value)}
             />
             <PortalInput
               id="online-address"
@@ -1289,6 +1150,7 @@ function OnlineRegistrationWizard({
               label="PhilHealth PIN"
               required={form.philHealthClientType !== "Not enrolled"}
               inputMode="numeric"
+              maxLength={12}
               value={form.philHealthPin}
               onChange={(value) => set("philHealthPin", value)}
             />
@@ -1306,6 +1168,7 @@ function OnlineRegistrationWizard({
                   label="Member / sponsor PIN"
                   required
                   inputMode="numeric"
+                  maxLength={12}
                   value={form.philHealthMemberPin}
                   onChange={(value) => set("philHealthMemberPin", value)}
                 />
@@ -1367,16 +1230,14 @@ function OnlineRegistrationWizard({
               </div>
             </div>
           </div>
+        ) : step === 4 ? (
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">Review your details before giving consent. Use Back to correct anything.</p>
+            <div className="rounded-2xl bg-muted p-4"><p className="font-semibold">{fullName}</p><p className="mt-1 text-muted-foreground">{form.dob} · {form.gender}</p><p className="mt-2">{form.mobile}</p><p className="text-muted-foreground">{address}</p></div>
+            <div className="rounded-2xl bg-muted p-4"><p className="font-semibold">PhilHealth</p><p className="text-muted-foreground">{form.philHealthClientType}{form.philHealthPin ? ` · ${form.philHealthPin}` : ""}</p></div>
+          </div>
         ) : (
           <div className="space-y-3">
-            <div className="rounded-2xl border border-border bg-muted/40 p-3">
-              <p className="text-xs font-semibold">Location is collected when booking</p>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                Registration stores the address you entered. SmartServe asks for
-                your current location only after you choose a clinic service, so
-                the verified pin can support disease-trend mapping.
-              </p>
-            </div>
             <PortalInput
               id="online-password"
               label="Create password"
@@ -1384,7 +1245,7 @@ function OnlineRegistrationWizard({
               type="password"
               value={form.password}
               onChange={(value) => set("password", value)}
-              placeholder="At least 4 characters"
+              placeholder="At least 12 characters"
             />
             <label className="flex items-start gap-2 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
               <input
@@ -1439,17 +1300,14 @@ function OnlineRegistrationWizard({
           </Button>
           <Button
             type="button"
-            onClick={step === 4 ? submit : next}
+            onClick={step === 5 ? submit : next}
+            disabled={saving || draftLoading}
             className="flex-1 rounded-xl bg-gradient-primary"
           >
-            {step === 4 ? "Create account" : "Continue"}
+            {saving ? "Saving…" : draftLoading ? "Loading draft…" : step === 5 ? "Create account" : "Continue"}
             <ChevronRight className="ml-1 h-4 w-4" />
           </Button>
         </div>
-        <p className="mt-4 text-center text-[10px] text-muted-foreground">
-          Your permanent patient ID is created after registration; future clinic
-          records stay attached to the same profile.
-        </p>
       </div>
     </div>
   );
@@ -1896,6 +1754,8 @@ function ScheduleScreen({
 }) {
   const svc = services.find((service) => service.id === serviceId) || {
     name: "Selected service",
+    building: "Super Health Center",
+    queueArea: "General Clinic",
   };
   const hasCapturedServiceLocation = Boolean(patient.mobileLocationVerifiedAt);
   const today = new Date();
@@ -2012,8 +1872,8 @@ function ConfirmScreen({
     name: "Selected service",
   };
   const appointmentBuilding =
-    svc.building ||
-    (svc.queueArea === "Animal Bite Center"
+    ("building" in svc && svc.building) ||
+    ("queueArea" in svc && svc.queueArea === "Animal Bite Center"
       ? "Animal Bite Center building"
       : "Super Health Center");
   return (
@@ -2694,7 +2554,7 @@ function BottomNav({
     { id: "profile", icon: User, label: "Me" },
   ];
   return (
-    <div className="absolute bottom-0 left-0 right-0 bg-card/95 backdrop-blur border-t border-border px-2 py-2 flex justify-around">
+    <nav aria-label="Patient navigation" className="relative z-40 flex w-full shrink-0 justify-around border-t border-border bg-card/95 px-2 pb-[calc(0.25rem+env(safe-area-inset-bottom))] pt-1 backdrop-blur">
       {items.map((it) => {
         const Icon = it.icon;
         const active = screen === it.id;
@@ -2703,7 +2563,7 @@ function BottomNav({
             key={it.id}
             onClick={() => setScreen(it.id)}
             className={cn(
-              "flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-smooth",
+              "flex min-h-11 flex-col items-center justify-center gap-0.5 py-1 px-3 rounded-xl transition-smooth",
               active ? "text-primary" : "text-muted-foreground",
             )}
           >
@@ -2712,6 +2572,6 @@ function BottomNav({
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }

@@ -31,10 +31,10 @@ function queueNumberRank(queueNumber: string) {
  * Returns doctor-ready patients in clinical priority order. Patients with the
  * same triage level retain their physical queue-number order.
  */
-export function orderDoctorQueue(appointments: QueueOrderableAppointment[]) {
+export function orderDoctorQueue<T extends QueueOrderableAppointment>(appointments: T[]): T[] {
   const ready = appointments
     .filter(appointment => appointment.queueStatus === "Waiting for Doctor")
-    .toSorted((left, right) => {
+    .sort((left, right) => {
       const queueDifference = queueNumberRank(left.queueNumber) - queueNumberRank(right.queueNumber);
       if (queueDifference !== 0) return queueDifference;
 
@@ -43,7 +43,7 @@ export function orderDoctorQueue(appointments: QueueOrderableAppointment[]) {
 
       return left.id.localeCompare(right.id);
     });
-  const ordered: QueueOrderableAppointment[] = [];
+  const ordered: T[] = [];
   for (const priority of Object.keys(priorityRank) as TriagePriority[]) {
     let remaining = ready.filter((appointment) => appointmentPriority(appointment) === priority);
     if (!remaining.length) continue;

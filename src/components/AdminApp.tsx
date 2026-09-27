@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ChangeEvent } from "react";
+import type { Patient, Service } from "@/data/mockData";
+import { toast } from "sonner";
 import {
   Calendar,
   Cast,
@@ -155,9 +157,11 @@ const defaultKpiPresentation = {
 export function AdminApp({
   currentUser,
   onSignOut,
+  onOpenProfile,
 }: {
   currentUser?: StaffUser;
   onSignOut?: () => void;
+  onOpenProfile?: () => void;
 }) {
   const [page, setPage] = useState<Page>("overview");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -169,6 +173,7 @@ export function AdminApp({
   const selectPage = (nextPage: Page) => {
     setPage(nextPage);
     if (settingsNav.some(([id]) => id === nextPage)) setSettingsOpen(true);
+    if (window.matchMedia("(max-width: 1023px)").matches) setSettingsOpen(false);
   };
   const displayName = currentUser?.fullName || "Administrator";
   const initials = displayName
@@ -186,7 +191,7 @@ export function AdminApp({
             <img
               src={superHealthCenterLogo}
               alt="Jones Super Health Center seal"
-              className="h-20 w-20 shrink-0 object-contain drop-shadow-md"
+              className="h-12 w-12 shrink-0 object-contain drop-shadow-md lg:h-20 lg:w-20"
             />
             <div className="min-w-0">
               <p className="font-display text-xl font-bold">SmartServe</p>
@@ -199,7 +204,7 @@ export function AdminApp({
             Workspace
           </p>
           <nav
-            className="flex gap-1 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible"
+            className="flex flex-wrap gap-1 pb-1 lg:block lg:space-y-1"
             aria-label="Administration navigation"
           >
             {workspaceNav.map(([id, label, Icon]) => (
@@ -229,7 +234,7 @@ export function AdminApp({
               {settingsOpen ? (
                 <div
                   id="settings-submenu"
-                  className="mt-1 flex gap-1 border-primary-foreground/20 pl-3 lg:block lg:space-y-1 lg:border-l"
+                  className="mt-1 grid grid-cols-2 gap-1 border-primary-foreground/20 pl-3 lg:block lg:space-y-1 lg:border-l"
                 >
                   {settingsNav.map(([id, label, Icon]) => (
                     <button
@@ -246,7 +251,7 @@ export function AdminApp({
               ) : null}
             </div>
           </nav>
-          <div className="mt-auto pt-6">
+          <div className="mt-auto pt-3 lg:pt-6">
             {!settingsOpen ? (
               <div className="mb-4 hidden 2xl:block">
                 <SidebarCalendar />
@@ -264,6 +269,11 @@ export function AdminApp({
                   <p className="truncate px-2 pb-2 pt-1 text-sm font-semibold">
                     {displayName}
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => { setAccountMenuOpen(false); onOpenProfile?.(); }}
+                    className="w-full rounded-xl px-2 py-2 text-left text-sm font-semibold hover:bg-muted"
+                  >My profile</button>
                   <button
                     type="button"
                     onClick={onSignOut}
@@ -465,11 +475,11 @@ function DiseaseTrendsPage({ patients, medicalRecords }: any) {
     [medicalRecords, patients],
   );
   const diagnoses = useMemo(
-    () => [...new Set(records.map((record: any) => record.diagnosis))].sort(),
+    () => [...new Set<string>(records.map((record: any) => record.diagnosis))].sort(),
     [records],
   );
   const municipalities = useMemo(
-    () => [...new Set(records.map((record: any) => record.municipality))].sort(),
+    () => [...new Set<string>(records.map((record: any) => record.municipality))].sort(),
     [records],
   );
   const filteredRecords = useMemo(
@@ -765,7 +775,7 @@ function OverviewDashboard({ store }: any) {
     }));
   }, [filteredAppointments, filteredRecords, from, to]);
   const statusData = useMemo(() => {
-    const results = Object.entries(
+    const results = Object.entries<number>(
       filteredAppointments.reduce(
         (counts: Record<string, number>, appointment: any) => {
           const label = appointment.queueStatus || "Scheduled";
@@ -926,7 +936,7 @@ function OverviewDashboard({ store }: any) {
             className="min-w-0 flex-1 truncate font-display text-sm font-bold tracking-tight text-slate-800 xl:text-base"
             title="AN INTEGRATED WEB APPLICATION FOR SERVICE BOOKING WITH DISEASE TREND MONITORING IN SUPER HEALTH CENTER OF JONES, ISABELA"
           >
-            AN INTEGRATED WEB APPLICATION FOR SERVICE BOOKING WITH DISEASE TREND MONITORING IN SUPER HEALTH CENTER OF JONES, ISABELA
+            <span className="lg:hidden">Clinic dashboard</span><span className="hidden lg:inline">SUPER HEALTH CENTER — JONES, ISABELA</span>
           </h1>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {activeFilterCount ? (
@@ -1328,7 +1338,7 @@ function AnalyticsPage({ store }: any) {
     return date.toISOString().slice(0, 10);
   }, [range]);
   const serviceById = useMemo(
-    () => new Map(services.map((service: any) => [service.id, service])),
+    () => new Map<string, Service>(services.map((service: Service) => [service.id, service])),
     [services],
   );
   const matchesArea = useCallback(
@@ -1458,8 +1468,8 @@ function ReportsPage({ store }: any) {
   const [to, setTo] = useState("");
   const [area, setArea] = useState("all");
   const { appointments = [], patients = [], medicalRecords = [], medicines = [], audit = [], services = [] } = store;
-  const patientById = useMemo(() => new Map(patients.map((item: any) => [item.id, item])), [patients]);
-  const serviceById = useMemo(() => new Map(services.map((item: any) => [item.id, item])), [services]);
+  const patientById = useMemo(() => new Map<string, Patient>(patients.map((item: Patient) => [item.id, item])), [patients]);
+  const serviceById = useMemo(() => new Map<string, Service>(services.map((item: Service) => [item.id, item])), [services]);
   const inRange = (date: string) => (!from || date >= from) && (!to || date <= to);
   const matchesArea = (item: any) => area === "all" || (item.careArea || item.queueArea || serviceById.get(item.serviceId)?.queueArea || "General Clinic") === area;
   const report = useMemo(() => {
@@ -1538,10 +1548,10 @@ function SettingsPage({ store }: any) {
   const [importOpen, setImportOpen] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const exportOperationalData = () => {
-    const patientById = new Map(
+    const patientById = new Map<string, Patient>(
       store.patients.map((patient: any) => [patient.id, patient]),
     );
-    const serviceById = new Map(
+    const serviceById = new Map<string, Service>(
       store.services.map((service: any) => [service.id, service]),
     );
     const rows = [
@@ -3680,7 +3690,7 @@ const apiRoleFor = (role: StaffRole): ApiManagedStaffUser["role"] => ({
   Doctor: "doctor",
   Pharmacy: "pharmacy",
   Administrator: "administrator",
-}[role]);
+} as const)[role];
 
 const displayRoleFor = (role: ApiManagedStaffUser["role"]): StaffRole => ({
   front_desk: "Front desk",
@@ -3688,7 +3698,7 @@ const displayRoleFor = (role: ApiManagedStaffUser["role"]): StaffRole => ({
   doctor: "Doctor",
   pharmacy: "Pharmacy",
   administrator: "Administrator",
-}[role]);
+} as const)[role];
 
 const apiDoctorStatusFor = (status: DoctorAvailability) => ({
   Available: "available",
@@ -3707,6 +3717,7 @@ const displayDoctorStatusFor = (status: ApiManagedStaffUser["doctor_availability
 }[status || "off_duty"] as DoctorAvailability);
 
 function StaffPage() {
+  const [isSaving, setIsSaving] = useState(false);
   const [dialog, setDialog] = useState<AccountDialog>(null);
   const [selected, setSelected] = useState<StaffUser | null>(null);
   const [form, setForm] = useState<AccountForm>(blankAccountForm);
@@ -3728,11 +3739,11 @@ function StaffPage() {
       setUsers(managedUsers.map((user) => ({
         id: String(user.id),
         fullName: user.name,
-        username: user.username,
+        username: user.username || "",
         password: "",
         role: displayRoleFor(user.role),
         active: user.is_active,
-        passwordChangeRequired: user.must_change_password,
+        passwordChangeRequired: user.must_change_password || !user.email_verified_at,
         doctorStatus: user.role === "doctor" ? displayDoctorStatusFor(user.doctor_availability) : undefined,
         recoveryEmail: user.email || undefined,
         assignedAreas: user.assigned_care_area_ids
@@ -3798,6 +3809,7 @@ function StaffPage() {
       }
       try {
         await resetAdminStaffPassword(Number(selected.id), form.password, form.confirmPassword);
+        toast.success("Password reset. Ask the user to open their activation email and choose a personal password.");
         await loadAccounts();
         close();
       } catch (requestError) {
@@ -3805,8 +3817,8 @@ function StaffPage() {
       }
       return;
     }
-    if (!form.fullName.trim() || !form.username.trim()) {
-      setError("Enter the account holder’s name and a username.");
+    if (!form.fullName.trim() || !form.recoveryEmail.trim() || !/^[a-z0-9_-]+$/.test(form.username.trim())) {
+      setError("Enter the name, email, and a username using lowercase letters, numbers, underscores or hyphens.");
       return;
     }
     if (dialog === "edit" && selected) {
@@ -3819,6 +3831,7 @@ function StaffPage() {
           assigned_care_area_ids: selected.role === "Administrator" ? [] : assignedAreaIds(form.assignedAreas),
           ...(selected.role === "Doctor" ? { doctor_availability: apiDoctorStatusFor(form.doctorStatus) } : {}),
         });
+        toast.success("Account saved. Email changes must be verified by the account holder.");
         await loadAccounts();
         close();
       } catch (requestError) {
@@ -3835,7 +3848,7 @@ function StaffPage() {
     try {
       await createAdminStaff({
         name: form.fullName.trim(),
-        username: form.username.trim(),
+        username: form.username.trim().toLowerCase(),
         email: form.recoveryEmail.trim() || null,
         password: form.password,
         password_confirmation: form.confirmPassword,
@@ -3844,6 +3857,7 @@ function StaffPage() {
         assigned_care_area_ids: role === "Administrator" ? [] : assignedAreaIds(form.assignedAreas),
         ...(role === "Doctor" ? { doctor_availability: apiDoctorStatusFor(form.doctorStatus) } : {}),
       });
+      toast.success("Account created. An activation link was sent to the account holder’s email.");
       await loadAccounts();
       close();
     } catch (requestError) {
@@ -3866,10 +3880,10 @@ function StaffPage() {
       : dialog === "doctor"
         ? "Only doctor accounts have an availability status that patients can view before booking."
         : dialog === "reset"
-          ? "Set a new temporary password. The user must change it at first sign-in."
+          ? "Set a temporary password and send a fresh activation email. The user chooses a personal password during activation."
           : "Accounts are saved in the SmartServe MySQL database and can sign in from any device.";
   const visibleUsers = users.filter((user) =>
-    [user.fullName, user.username, user.role, user.assignedAreas?.join(" ")]
+    [user.fullName, user.recoveryEmail, user.role, user.assignedAreas?.join(" ")]
       .filter(Boolean)
       .join(" ")
       .toLocaleLowerCase("en-PH")
@@ -3919,7 +3933,7 @@ function StaffPage() {
         <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="sticky top-0 z-10 hidden border-b border-border bg-muted/95 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground xl:grid xl:grid-cols-[minmax(210px,1.3fr)_minmax(125px,0.75fr)_minmax(120px,0.75fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(110px,0.7fr)_auto] xl:gap-3">
           <span>Account holder</span>
-          <span>Username</span>
+          <span>Username / Email</span>
           <span>Account status</span>
           <span>Doctor availability</span>
           <span>Assignment</span>
@@ -3947,7 +3961,7 @@ function StaffPage() {
               className="grid gap-3 border-b border-border px-3 py-4 transition-colors hover:bg-primary-soft/30 last:border-0 sm:grid-cols-2 xl:grid-cols-[minmax(210px,1.3fr)_minmax(125px,0.75fr)_minmax(120px,0.75fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(110px,0.7fr)_auto] xl:items-center xl:gap-3"
             >
               <div className="flex min-w-0 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary-soft text-xs font-bold text-primary">{initials}</span><p className="min-w-0 truncate font-semibold">{user.fullName}</p></div>
-              <p className="truncate font-mono text-sm text-muted-foreground">@{user.username}</p>
+              <div className="min-w-0 text-sm"><p className="truncate font-mono font-semibold">{user.username}</p><p className="truncate text-slate-700">{user.recoveryEmail || "No email"}</p><p className="mt-1 text-xs text-slate-700">{user.passwordChangeRequired ? "Activation required" : "Account ready"}</p></div>
               <span className={`flex w-fit items-center gap-1.5 text-sm font-medium ${user.active ? "text-emerald-600" : "text-muted-foreground"}`}><span className={`h-2 w-2 rounded-full ${user.active ? "bg-emerald-500" : "bg-slate-400"}`} />{user.active ? "Active" : "Disabled"}</span>
               <Badge className={`w-fit border-0 ${availabilityTone}`}>{availability}</Badge>
               <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><MapPin className="h-4 w-4 text-primary" />{user.assignedAreas?.includes("Animal Bite Center") ? "Animal Bite Center" : "General Clinic"}</span>
@@ -3962,7 +3976,7 @@ function StaffPage() {
         </div>
       </Panel>
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && close()}>
-        <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto rounded-2xl p-0">
+        <DialogContent className="max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-2xl p-0">
           <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5 pr-14">
             <DialogTitle className="flex items-center gap-2 font-display text-2xl">
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-soft">
@@ -3976,7 +3990,9 @@ function StaffPage() {
             {dialog === "reset" ? null : (
               <>
                 <Field label="Full name" value={form.fullName} onChange={(fullName: string) => setForm({ ...form, fullName })} />
-                <Field label="Username" value={form.username} onChange={(username: string) => setForm({ ...form, username })} />
+                <Field label="Username (lowercase letters, numbers, _ or -)" value={form.username} onChange={(username: string) => setForm({ ...form, username: username.toLowerCase() })} />
+                <Field label="Email address" value={form.recoveryEmail} onChange={(recoveryEmail: string) => setForm({ ...form, recoveryEmail })} />
+                <p className="text-sm text-slate-800">An activation link is emailed to the account holder. After verification, use the username and chosen password to sign in. Forgot password accepts the username and sends a link to the verified email.</p>
                 {dialog === "staff" ? (
                   <div>
                     <Label htmlFor="staff-role">Role</Label>
@@ -4004,7 +4020,7 @@ function StaffPage() {
                 {isAdmin ? (
                   <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
                     <Field label="Title / position" value={form.title} onChange={(title: string) => setForm({ ...form, title })} />
-                    <Field label="Recovery email" value={form.recoveryEmail} onChange={(recoveryEmail: string) => setForm({ ...form, recoveryEmail })} />
+                    <p className="rounded-xl bg-muted px-3 py-2 text-sm text-slate-800">Use the username to sign in. The verified email is used for password recovery.</p>
                     <Field label="Mobile number" value={form.mobile} onChange={(mobile: string) => setForm({ ...form, mobile })} />
                     <div className="sm:col-span-2">
                       <Label htmlFor="admin-notes">Internal setup notes</Label>
@@ -4015,12 +4031,12 @@ function StaffPage() {
                 {dialog !== "edit" ? (
                   <label className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 text-sm">
                     <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
-                    Account is active and can sign in
+                    Account is active (email activation is still required)
                   </label>
                 ) : null}
               </>
             )}
-            {(dialog !== "edit" || dialog === "reset") ? (
+            {dialog !== "edit" ? (
               <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
                 <div>
                       <Label htmlFor="temporary-password">Temporary password</Label>
@@ -4051,7 +4067,7 @@ function StaffPage() {
               </div>
             ) : null}
             <Button variant="outline" onClick={close}>Cancel</Button>
-            <Button onClick={save}><KeyRound className="mr-2 h-4 w-4" />{dialog === "edit" ? "Save account" : dialog === "reset" ? "Save temporary password" : "Create account"}</Button>
+            <Button disabled={isSaving} onClick={async () => { if (isSaving) return; setIsSaving(true); try { await save(); } finally { setIsSaving(false); } }}><KeyRound className="mr-2 h-4 w-4" />{isSaving ? "Saving…" : dialog === "edit" ? "Save account" : dialog === "reset" ? "Save temporary password" : "Create account"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -4372,7 +4388,7 @@ function InventoryHistory({
             (!dateBounds.to || at <= dateBounds.to)
           );
         })
-        .toSorted(
+        .sort(
           (left, right) =>
             new Date(right.at).getTime() - new Date(left.at).getTime(),
         ),
@@ -4387,7 +4403,7 @@ function InventoryHistory({
       else current.dispensed += transaction.quantity;
       daily.set(date, current);
     });
-    return Array.from(daily.values()).toSorted((left, right) =>
+    return Array.from(daily.values()).sort((left, right) =>
       left.date.localeCompare(right.date),
     );
   }, [filteredTransactions]);
@@ -4654,14 +4670,16 @@ function Field({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const id = useId();
   return (
     <div>
-      <Label>{label}</Label>
+      <Label htmlFor={id}>{label}</Label>
       <Input
+        id={id}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 disabled:bg-muted disabled:text-muted-foreground"
+        className="mt-1 text-base disabled:bg-muted disabled:text-muted-foreground"
       />
     </div>
   );

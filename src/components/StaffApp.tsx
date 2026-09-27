@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ClipboardPlus,
@@ -209,7 +209,7 @@ export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
     { id: "queue" as FrontDeskTab, label: isAnimalBiteWorkspace ? "Animal Bite Queue" : "Queue Control", icon: Activity },
   ];
   return (
-    <div className="space-y-6">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       {isNurseTriage ? <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/70 pb-5">
         <h2 className="text-2xl md:text-3xl font-display font-bold">
           {isAnimalBiteWorkspace
@@ -218,10 +218,10 @@ export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
         </h2>
       </div> : null}
       {isNurseTriage ? (
-        <TriageForm area={careArea} />
+        <div className="min-h-0 flex-1 overflow-y-auto"><TriageForm area={careArea} /></div>
       ) : (
         <>
-          <div className="flex justify-center">
+          <div className="flex shrink-0 justify-center">
             <div className="inline-flex flex-wrap justify-center p-1 bg-muted rounded-2xl">
               {frontDeskTabs.map((item) => {
                 const Icon = item.icon;
@@ -244,11 +244,11 @@ export function StaffApp({ currentUser }: { currentUser?: StaffUser }) {
             </div>
           </div>
           {tab === "checkin" && (
-            <Checkin area={careArea} />
+            <div className="min-h-0 flex-1 overflow-y-auto"><Checkin area={careArea} /></div>
           )}
           {tab === "intake" && <FrontDeskIntake services={store.services} area={careArea} />}
           {tab === "queue" && (
-            <Queue appts={store.appointments} patients={store.patients} call={store.callNext} absent={store.markAbsent} area={careArea} />
+            <div className="min-h-0 flex-1 overflow-y-auto"><Queue appts={store.appointments} patients={store.patients} call={store.callNext} absent={store.markAbsent} area={careArea} /></div>
           )}
         </>
       )}
@@ -306,9 +306,9 @@ function Board({
   };
 
   return (
-    <div className="tv-frame max-w-[1200px]">
-      <div className="bg-gradient-tv text-primary-foreground p-6 md:p-8">
-        <div className="flex justify-between mb-6">
+    <div className="tv-frame h-screen min-h-0 w-full max-w-none rounded-none border-0">
+      <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-gradient-tv p-6 text-primary-foreground md:p-10">
+        <div className="flex justify-between gap-6 pb-6">
           <div>
             <h2 className="font-display font-extrabold text-xl md:text-2xl">
               {area === "Animal Bite Center" ? "ANIMAL BITE CENTER" : "SUPER HEALTH CENTER"}
@@ -324,7 +324,26 @@ function Board({
             })}
           </p>
         </div>
-        <div className="grid gap-4 md:grid-cols-2 mb-6">
+        <section className="mb-6 rounded-2xl bg-card/5 p-5 md:p-6">
+          <div className="flex items-center justify-between gap-4">
+            <h3 className="font-display text-lg font-bold md:text-2xl">Doctor availability</h3>
+            <p className="text-xs uppercase tracking-[.12em] text-primary-foreground/60">Live status</p>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {areaDoctors.map((doctor) => (
+              <div key={doctor.id} className="flex items-center justify-between gap-3 rounded-xl bg-card/5 px-4 py-3 md:px-5 md:py-4">
+                <p className="truncate text-base font-semibold md:text-lg">{doctor.fullName}</p>
+                <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${doctorTone[doctor.doctorStatus]}`}>
+                  {doctor.doctorStatus}
+                </span>
+              </div>
+            ))}
+            {!areaDoctors.length ? (
+              <p className="text-sm text-primary-foreground/60">No doctor is assigned to this queue.</p>
+            ) : null}
+          </div>
+        </section>
+        <div className="mb-6 grid gap-5 md:grid-cols-2">
           <div className="rounded-2xl bg-card/5 p-5">
             <p className="text-xs font-semibold uppercase tracking-[.12em] text-primary-foreground/70">Now serving · nurse / triage</p>
             {triageServing.length ? triageServing.map((a) => (
@@ -351,23 +370,7 @@ function Board({
             )) : <p className="mt-6 text-center text-sm text-primary-foreground/60">No patient is currently with the doctor.</p>}
           </div>
         </div>
-        <div className="mb-6 rounded-2xl bg-card/5 p-5">
-          <h3 className="font-display text-lg font-bold">Doctor availability</h3>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {areaDoctors.map((doctor) => (
-              <div key={doctor.id} className="flex items-center justify-between gap-3 rounded-xl bg-card/5 px-4 py-3">
-                <p className="truncate font-semibold">{doctor.fullName}</p>
-                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${doctorTone[doctor.doctorStatus]}`}>
-                  {doctor.doctorStatus}
-                </span>
-              </div>
-            ))}
-            {!areaDoctors.length ? (
-              <p className="text-sm text-primary-foreground/60">No doctor is assigned to this queue.</p>
-            ) : null}
-          </div>
-        </div>
-        <div className="bg-card/5 rounded-2xl p-5">
+        <div className="flex-1 rounded-2xl bg-card/5 p-5">
           <h3 className="font-display font-bold text-lg mb-3">Up next</h3>
           {visibleUpNext.map((a, i) => (
             <div
@@ -391,10 +394,6 @@ function Board({
             <p className="text-primary-foreground/50">Queue is clear.</p>
           )}
         </div>
-        <p className="text-center text-xs text-primary-foreground/50 mt-6">
-          Please listen for your queue number. Patient names are not displayed
-          on this monitor.
-        </p>
       </div>
     </div>
   );
@@ -407,7 +406,6 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
     doctors: [],
     updatedAt: "",
   });
-  const [connection, setConnection] = useState("Connecting to the local SmartServe queue…");
   const area = forcedArea || (new URLSearchParams(window.location.search).get("area") === "animal-bite" ? "Animal Bite Center" : "General Clinic");
   const isLocalBoard = import.meta.env.DEV;
   const hostedEndpoint = area === "Animal Bite Center"
@@ -437,16 +435,8 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
           doctors: Array.isArray(state.doctors) ? state.doctors : [],
           updatedAt: state.updatedAt || "",
         });
-        setConnection(
-          state.updatedAt
-            ? `${isLocalBoard ? "Live local queue" : "Live queue"} · last update ${new Date(state.updatedAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
-            : "Waiting for the first queue update.",
-        );
       } catch {
-        if (active)
-          setConnection(isLocalBoard
-            ? "Waiting for the local SmartServe server. Keep this TV on the same clinic network."
-            : "Waiting for the secure SmartServe queue service.");
+        // Keep the last safe public queue state visible while the next poll retries.
       }
     };
     void refresh();
@@ -458,9 +448,8 @@ export function QueueTvDisplay({ area: forcedArea }: { area?: CareArea }) {
   }, [endpoint, isLocalBoard]);
 
   return (
-    <main className="min-h-screen bg-slate-950 p-3 md:p-6">
+    <main className="h-screen overflow-hidden bg-slate-950">
       <Board appts={queue.appointments} doctors={queue.doctors} now={now} area={area} />
-      <p className="mt-3 text-center text-xs text-slate-400">{connection}</p>
     </main>
   );
 }
@@ -495,7 +484,7 @@ function Checkin({ area }: { area: CareArea }) {
     return () => window.clearTimeout(timeout);
   }, [confirmation]);
   return (
-    <div className="mx-auto flex max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-card lg:h-[calc(100dvh-18rem)]">
+    <div className="flex h-full w-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-card">
       <div className="shrink-0 border-b border-border p-5">
         <h3 className="font-display font-bold text-lg">
           {area === "Animal Bite Center" ? "Animal Bite patient check-in" : "Scheduled patient check-in"}
@@ -579,8 +568,8 @@ function FrontDeskIntake({ services, area }: { services: Service[]; area: CareAr
   const isAnimalBiteWorkspace = area === "Animal Bite Center";
   const areaServices = services.filter((service) => (service.queueArea || "General Clinic") === area);
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="grid md:grid-cols-2 gap-3 mb-5">
+    <div className="flex min-h-0 w-full flex-1 flex-col">
+      <div className="mb-3 grid shrink-0 grid-cols-2 gap-3">
         <Action
           active={mode === "register"}
           icon={UserPlus}
@@ -605,11 +594,11 @@ function FrontDeskIntake({ services, area }: { services: Service[]; area: CareAr
         />
       )}{" "}
       {mode === "walkin" && (
-        <WalkInForm
+        <div className="min-h-0 flex-1 overflow-y-auto"><WalkInForm
           services={areaServices}
           area={area}
           initialPatientId={newlyRegisteredPatientId}
-        />
+        /></div>
       )}
     </div>
   );
@@ -619,13 +608,13 @@ function Action({ active, icon: Icon, title, description, onClick }: any) {
     <button
       onClick={onClick}
       className={cn(
-        "text-left rounded-2xl border p-4 transition-smooth",
+        "flex items-center gap-2 text-left rounded-xl border px-3 py-2 text-sm transition-smooth",
         active
           ? "border-primary bg-primary-soft shadow-soft"
           : "border-border bg-card hover:bg-muted/50",
       )}
     >
-      <Icon className="w-5 h-5 text-primary mb-3" />
+      <Icon className="h-4 w-4 shrink-0 text-primary" />
       <p className="font-display font-bold">{title}</p>
     </button>
   );
@@ -682,13 +671,22 @@ function RegistrationTextInput({
   );
 }
 
-function RegistrationForm({
+export function RegistrationForm({
   onRegistered,
   onContinueToWalkIn,
 }: {
   onRegistered: (patientId: string) => void;
   onContinueToWalkIn: () => void;
 }) {
+  const steps = ["Identity", "Contact", "Address", "Coverage", "Guardian", "Location", "Review & consent"];
+  const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const stepBody = useRef<HTMLDivElement>(null);
+  const stepHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    stepBody.current?.scrollTo?.(0, 0);
+    stepHeading.current?.focus();
+  }, [step]);
   const [form, setForm] = useState({
     givenName: "",
     familyName: "",
@@ -881,6 +879,7 @@ function RegistrationForm({
     );
   };
   const submit = async () => {
+    if (saving || registrationSuccess || step !== steps.length - 1) return;
     setRegistrationError("");
     if (
       !form.givenName ||
@@ -910,6 +909,7 @@ function RegistrationForm({
       );
       return;
     }
+    setSaving(true);
     try {
       const result = await registerOnsitePatient({
         given_name: form.givenName, family_name: form.familyName, middle_name: form.middleName || null, suffix: form.suffix || null,
@@ -921,6 +921,8 @@ function RegistrationForm({
       setRegistrationSuccess(`${fullName} was registered successfully. Portal sign-in: ${result.data.patient_number}. Temporary password: ${result.data.default_password}. Give these privately to the patient, then they can continue to walk-in.`);
     } catch (requestError) {
       setRegistrationError(requestError instanceof ApiError ? requestError.message : "Could not save this patient record.");
+    } finally {
+      setSaving(false);
     }
   };
   const identityFields = [
@@ -956,20 +958,44 @@ function RegistrationForm({
       .finally(() => { if (active) setBarangayDirectoryLoading(false); });
     return () => { active = false; };
   }, [form.municipality]);
+  const continueStep = () => {
+    const fields = stepBody.current?.querySelectorAll<HTMLInputElement | HTMLSelectElement>(`[data-step="${step}"] input, [data-step="${step}"] select`);
+    const invalid = Array.from(fields ?? []).find((field) => !field.checkValidity() || (field.required && !field.value.trim()));
+    if (invalid) {
+      setRegistrationError("Complete the required fields correctly before continuing.");
+      invalid.focus();
+      invalid.reportValidity();
+      return;
+    }
+    if (step === 5 && !hasUsableLocation) {
+      setRegistrationError("Place the residence pin and verify it with the patient before continuing.");
+      return;
+    }
+    setRegistrationError("");
+    setStep(Math.min(step + 1, steps.length - 1));
+  };
   return (
-    <section className="flex flex-col overflow-hidden bg-card border border-border rounded-2xl p-5 shadow-soft lg:h-[calc(100dvh-18rem)]">
-      <h3 className="font-display font-bold text-lg">
-        Manual patient registration
-      </h3>
-      <div className="mt-5 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
-        <section className="rounded-2xl border border-border bg-muted/20 p-4">
+    <section aria-label="Onsite patient registration" className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
+      <header className="shrink-0 border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <h3 ref={stepHeading} tabIndex={-1} className="font-display text-lg font-bold outline-none">Onsite registration · {steps[step]}</h3>
+          <span className="shrink-0 text-xs text-slate-700">Step {step + 1} of {steps.length}</span>
+        </div>
+        <ol aria-label="Registration progress" className="mt-2 grid grid-cols-7 gap-1">
+          {steps.map((label, index) => <li key={label} aria-current={step === index ? "step" : undefined} className={cn("rounded-md px-1 py-1.5 text-center text-xs", index === step ? "bg-primary text-primary-foreground" : index < step ? "bg-primary-soft text-primary" : "bg-muted text-slate-600")}>
+            <span className="sm:hidden">{index + 1}</span><span className="hidden sm:inline">{label}</span>
+          </li>)}
+        </ol>
+      </header>
+      <div ref={stepBody} className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+        <section data-step="0" hidden={step !== 0} className="rounded-2xl border border-border bg-muted/20 p-4">
           <div className="mb-4">
             <h4 className="font-display font-bold">Patient identity</h4>
             <p className="text-xs text-muted-foreground">
               Use the legal name shown on the patient’s available record.
             </p>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {identityFields.map(([key, label, required, autoComplete]) => (
               <RegistrationTextInput
                 key={key}
@@ -1018,6 +1044,7 @@ function RegistrationForm({
               </Label>
               <select
                 id="patient-gender"
+                required
                 value={form.gender}
                 onChange={(event) => set("gender", event.target.value)}
                 className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -1031,7 +1058,7 @@ function RegistrationForm({
           </div>
         </section>
 
-        <section className="rounded-2xl border border-border bg-muted/20 p-4">
+        <section data-step="1" hidden={step !== 1} className="rounded-2xl border border-border bg-muted/20 p-4">
           <div className="mb-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="font-display font-bold">Contact details</h4>
@@ -1061,7 +1088,7 @@ function RegistrationForm({
           </div>
         </section>
 
-        <section className="rounded-2xl border border-border bg-muted/20 p-4">
+        <section data-step="2" hidden={step !== 2} className="rounded-2xl border border-border bg-muted/20 p-4">
           <div className="mb-4">
             <h4 className="font-display font-bold">Residence address</h4>
             <p className="text-xs text-muted-foreground">
@@ -1095,6 +1122,7 @@ function RegistrationForm({
               <Label htmlFor="patient-municipality">Municipality / city <span className="text-destructive">*</span></Label>
               <select
                 id="patient-municipality"
+                required
                 value={form.municipality}
                 onChange={(event) => {
                   set("municipality", event.target.value);
@@ -1110,6 +1138,7 @@ function RegistrationForm({
               <Label htmlFor="patient-barangay">Barangay <span className="text-destructive">*</span></Label>
               <select
                 id="patient-barangay"
+                required
                 value={form.barangay}
                 onChange={(event) => set("barangay", event.target.value)}
                 disabled={!form.municipality || barangayDirectoryLoading || !municipalityBarangays.length}
@@ -1129,7 +1158,7 @@ function RegistrationForm({
           </div>
         </section>
 
-        <section className="rounded-2xl border border-border bg-muted/20 p-4">
+        <section data-step="3" hidden={step !== 3} className="rounded-2xl border border-border bg-muted/20 p-4">
           <div className="mb-4">
             <h4 className="font-display font-bold">PhilHealth coverage</h4>
             <p className="text-xs text-muted-foreground">
@@ -1186,7 +1215,7 @@ function RegistrationForm({
           </div>
         </section>
 
-        <section className="rounded-2xl border border-border bg-muted/20 p-4">
+        <section data-step="4" hidden={step !== 4} className="rounded-2xl border border-border bg-muted/20 p-4">
           <div className="mb-4">
             <h4 className="font-display font-bold">
               Guardian and emergency contact
@@ -1245,8 +1274,8 @@ function RegistrationForm({
             />
           </div>
         </section>
-      <div className="mt-5 rounded-2xl border border-border bg-muted/20 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div data-step="5" hidden={step !== 5} className={cn("rounded-2xl border border-border bg-muted/20 p-4", step === 5 && "grid gap-2 lg:grid-cols-2")}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:col-span-2">
           <div>
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-primary" />
@@ -1270,7 +1299,7 @@ function RegistrationForm({
           </Button>
         </div>
         {candidates.length ? (
-          <div className="mt-3 overflow-hidden rounded-xl border border-border bg-card">
+          <div className="mt-3 max-h-32 overflow-y-auto rounded-xl border border-border bg-card lg:col-start-1">
             <p className="border-b border-border px-3 py-2 text-xs font-semibold text-muted-foreground">
               Choose the most precise match
             </p>
@@ -1289,8 +1318,8 @@ function RegistrationForm({
             ))}
           </div>
         ) : null}
-        <div className="mt-3">
-          <LocationPickerMap
+        <div className="mt-3 lg:col-start-2 lg:row-start-2 lg:row-span-5">
+          {step === 5 && <LocationPickerMap
             value={pin}
             showCurrentLocation={false}
             onChange={(next) => {
@@ -1305,14 +1334,14 @@ function RegistrationForm({
               setLocationVerified(false);
               setVerifiedAddress("");
             }}
-          />
+          />}
         </div>
         {locationDetailsStatus ? (
-          <p className="mt-3 text-xs text-muted-foreground">
+          <p className="mt-3 text-xs text-muted-foreground lg:col-start-1">
             {locationDetailsStatus}
           </p>
         ) : null}
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground lg:col-start-1">
           <span>{pinStatus}</span>
           {pin ? (
             <span>
@@ -1322,7 +1351,7 @@ function RegistrationForm({
           ) : null}
         </div>
         {pin ? (
-          <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-primary/20 bg-primary-soft/50 p-3 text-sm">
+          <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-primary/20 bg-primary-soft/50 p-3 text-sm lg:col-start-1">
             <input
               type="checkbox"
               checked={locationVerified && verifiedAddress === address}
@@ -1346,12 +1375,38 @@ function RegistrationForm({
           </label>
         ) : null}
         {!hasUsableLocation ? (
-          <p className="mt-2 text-xs font-medium text-amber-700">
+          <p className="mt-2 text-xs font-medium text-amber-700 lg:col-start-1">
             Search the complete address or place an exact residence pin, then
             verify it with the patient before saving.
           </p>
         ) : null}
       </div>
+      <section data-step="6" hidden={step !== 6}>
+        <h4 className="mb-3 font-semibold">Review the information with the patient before saving</h4>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {[
+            { title: "Identity", index: 0, details: [fullName, form.dob, form.gender, form.nationality, form.preferredLanguage, form.civilStatus] },
+            { title: "Contact", index: 1, details: [form.contact, form.alternateContact, form.email] },
+            { title: "Address", index: 2, details: [address] },
+            { title: "Coverage", index: 3, details: [form.philHealthClientType, form.philHealthPin, form.philHealthMemberName, form.philHealthMemberPin] },
+            { title: "Guardian / emergency", index: 4, details: [form.guardianName, form.guardianRelationship, form.guardianContact, form.emergencyContactName, form.emergencyContactRelationship, form.emergencyContactPhone] },
+            { title: "Residence pin", index: 5, details: [pin ? `${pin.latitude.toFixed(5)}, ${pin.longitude.toFixed(5)}` : "No pin", hasUsableLocation ? "Verified with patient" : "Needs verification"] },
+          ].map(({ title, index, details }) => <div key={title} className="rounded-xl border border-border p-3 text-sm">
+            <div className="mb-1 flex items-center justify-between"><h5 className="font-semibold">{title}</h5><button type="button" disabled={saving || Boolean(registrationSuccess)} onClick={() => { setRegistrationError(""); setStep(index); }} className="text-primary underline">Edit {title.toLowerCase()}</button></div>
+            <p className="break-words text-slate-700">{details.filter(Boolean).join(" · ") || "Not provided"}</p>
+          </div>)}
+        </div>
+      <label className="mt-4 flex gap-2 text-sm">
+        <input type="checkbox" checked={form.consentToTreatment} disabled={saving || Boolean(registrationSuccess)} onChange={(event) => set("consentToTreatment", event.target.checked)} />
+        Patient/guardian consent to treatment was verified.
+      </label>
+      <label className="mt-2 flex gap-2 text-sm">
+        <input type="checkbox" checked={form.privacyAcknowledged} disabled={saving || Boolean(registrationSuccess)} onChange={(event) => set("privacyAcknowledged", event.target.checked)} />
+        Privacy notice was acknowledged.
+      </label>
+      </section>
+      </div>
+      <footer className="shrink-0 border-t border-border bg-card px-4 py-3">
       {registrationError ? (
         <p
           className="mt-4 rounded-xl border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive"
@@ -1368,26 +1423,11 @@ function RegistrationForm({
           {registrationSuccess}
         </p>
       ) : null}
-      <div className="flex gap-2 mt-5 text-sm">
-        <input
-          type="checkbox"
-          checked={form.consentToTreatment}
-          onChange={(event) => set("consentToTreatment", event.target.checked)}
-        />
-        <span>Patient/guardian consent to treatment was verified.</span>
-      </div>
-      <div className="flex gap-2 mt-2 text-sm">
-        <input
-          type="checkbox"
-          checked={form.privacyAcknowledged}
-          onChange={(event) => set("privacyAcknowledged", event.target.checked)}
-        />
-        <span>Privacy notice was acknowledged.</span>
-      </div>
-      <div className="mt-5 flex flex-wrap gap-3">
-        <Button
+      <div className="flex items-center justify-between gap-3">
+        <Button type="button" variant="outline" disabled={step === 0 || saving || Boolean(registrationSuccess)} onClick={() => { setRegistrationError(""); setStep((current) => current - 1); }}>Back</Button>
+        {step < steps.length - 1 ? <Button type="button" onClick={continueStep}>Continue</Button> : <Button
           disabled={
-            Boolean(registrationSuccess) ||
+            saving || Boolean(registrationSuccess) ||
             !form.givenName ||
             !form.familyName ||
             !form.dob ||
@@ -1414,8 +1454,8 @@ function RegistrationForm({
           className="mt-0"
         >
           <UserPlus className="w-4 h-4 mr-2" />
-          Register patient
-        </Button>
+          {saving ? "Saving patient…" : "Register patient"}
+        </Button>}
         {registrationSuccess ? (
           <Button type="button" variant="outline" onClick={onContinueToWalkIn}>
             <Users className="mr-2 h-4 w-4" />
@@ -1423,7 +1463,7 @@ function RegistrationForm({
           </Button>
         ) : null}
       </div>
-      </div>
+      </footer>
     </section>
   );
 }
@@ -1749,7 +1789,7 @@ function Queue({ appts, patients, call, absent, area }: any) {
     Normal: "bg-primary-soft text-primary",
   };
   return (
-    <div className="grid max-w-5xl gap-4 md:grid-cols-3 lg:h-[calc(100dvh-18rem)]">
+    <div className="grid min-h-full w-full gap-4 md:grid-cols-3">
       <div className="flex min-h-0 flex-col gap-4 md:col-span-2">
         <div className="bg-gradient-primary text-primary-foreground rounded-2xl p-6">
           <p className="text-xs uppercase opacity-80">{area} · now serving</p>

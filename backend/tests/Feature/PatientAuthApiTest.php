@@ -10,7 +10,7 @@ class PatientAuthApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_a_patient_can_register_and_sign_in_using_the_generated_patient_number(): void
+    public function test_patient_registers_then_signs_in_with_email(): void
     {
         $provinceId = DB::table('provinces')->insertGetId(['name' => 'Isabela']);
         $municipalityId = DB::table('municipalities')->insertGetId([
@@ -32,6 +32,17 @@ class PatientAuthApiTest extends TestCase
             'daily_capacity' => 60,
             'is_active' => true,
         ]);
+        $registrationToken = 'verified-registration-token';
+        DB::table('pending_email_verifications')->insert([
+            'email' => 'juan@example.com',
+            'verification_token_hash' => hash('sha256', 'verification-token'),
+            'verification_expires_at' => now()->addMinutes(30),
+            'verified_at' => now(),
+            'registration_token_hash' => hash('sha256', $registrationToken),
+            'registration_expires_at' => now()->addHour(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         $registration = $this->postJson('/api/v1/patient-auth/register', [
             'given_name' => 'Juan',
@@ -40,6 +51,7 @@ class PatientAuthApiTest extends TestCase
             'sex' => 'male',
             'mobile_number' => '09171234567',
             'email' => 'juan@example.com',
+            'registration_email_token' => $registrationToken,
             'password' => 'SecurePass123!',
             'password_confirmation' => 'SecurePass123!',
             'barangay_id' => $barangayId,
@@ -51,10 +63,14 @@ class PatientAuthApiTest extends TestCase
         $registration
             ->assertCreated()
             ->assertJsonPath('patient.patient_number', 'PT-000001')
-            ->assertJsonPath('email_verification_required', true)
-            ->assertJsonStructure(['token']);
+            ->assertJsonPath('email_verification_required', false)
+            ->assertJsonMissingPath('token');
 
-        $this->withToken($registration->json('token'))
+        $login = $this->postJson('/api/v1/auth/login', [
+            'identifier' => 'juan@example.com', 'password' => 'SecurePass123!',
+        ])->assertOk();
+
+        $this->withToken($login->json('token'))
             ->postJson('/api/v1/appointments', [
                 'service_id' => $serviceId,
                 'appointment_date' => now()->toDateString(),
@@ -63,7 +79,7 @@ class PatientAuthApiTest extends TestCase
             ->assertJsonPath('data.status', 'scheduled');
 
         $this->postJson('/api/v1/patient-auth/login', [
-            'identifier' => 'PT-000001',
+            'identifier' => 'juan@example.com',
             'password' => 'SecurePass123!',
         ])
             ->assertOk()

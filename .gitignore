@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 .vercel
 .env*
+
+# Isolated, disposable browser verification database and captures.
+backend/storage/framework/browser-review.sqlite*
+*-mobile-review.png
+onsite-steps-review.png

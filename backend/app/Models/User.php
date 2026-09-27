@@ -3,17 +3,31 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Notifications\ClinicAccountMail;
 use Database\Factories\UserFactory;
+use Illuminate\Auth\MustVerifyEmail as MustVerifyEmailTrait;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new ClinicAccountMail(
+            'Reset your password',
+            'We received a request to reset your Super Health Center password. Choose a new password using the secure button below. Patients sign in with email; clinic team members sign in with their username.',
+            'Choose a new password',
+            rtrim(config('smartserve.frontend_url'), '/').'/?reset_email='.urlencode($this->email).'&reset_token='.urlencode($token),
+            (int) config('auth.passwords.users.expire', 60),
+        ));
+    }
+
     /** @use HasFactory<UserFactory> */
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, MustVerifyEmailTrait, Notifiable;
 
     /**
      * The attributes that are mass assignable.
@@ -24,6 +38,7 @@ class User extends Authenticatable
         'name',
         'username',
         'email',
+        'email_verified_at',
         'password',
         'role',
         'is_active',

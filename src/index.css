@@ -156,8 +156,7 @@
   }
 }
 
-/* Keep mobile screens clean while preserving normal touch scrolling. */
-@media (max-width: 767px) {
+/* Hide tracks on every workspace; preserve touch, wheel and keyboard scrolling. */
   html,
   body,
   * {
@@ -168,8 +167,6 @@
   *::-webkit-scrollbar {
     display: none;
   }
-}
-
 @keyframes slide-in-right {
   from { transform: translateX(20px); opacity: 0; }
   to   { transform: translateX(0); opacity: 1; }
