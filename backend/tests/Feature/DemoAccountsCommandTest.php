@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use Database\Seeders\LocalDemoAccountSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class DemoAccountsCommandTest extends TestCase
@@ -39,6 +40,19 @@ class DemoAccountsCommandTest extends TestCase
             $this->assertFalse($demo->must_change_password);
             $this->assertTrue(password_verify(LocalDemoAccountSeeder::PASSWORD, $demo->password));
         }
+    }
+
+    public function test_local_demo_seeder_repairs_a_legacy_non_bcrypt_password(): void
+    {
+        $this->seed(LocalDemoAccountSeeder::class);
+        DB::table('users')
+            ->where('username', 'demo_administrator')
+            ->update(['password' => 'legacy-plain-text-password']);
+
+        $this->seed(LocalDemoAccountSeeder::class);
+
+        $password = User::where('username', 'demo_administrator')->value('password');
+        $this->assertTrue(password_verify(LocalDemoAccountSeeder::PASSWORD, $password));
     }
 
     public function test_preview_does_not_modify_accounts(): void

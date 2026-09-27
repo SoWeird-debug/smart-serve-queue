@@ -43,7 +43,17 @@ class LocalDemoAccountSeeder extends Seeder
                 'must_change_password' => false,
                 'assigned_care_areas' => $areas,
             ]);
-            if (! $user->exists || ! Hash::check(self::PASSWORD, (string) $user->password)) {
+            $passwordMatches = false;
+            if ($user->exists) {
+                try {
+                    $passwordMatches = Hash::check(self::PASSWORD, (string) $user->password);
+                } catch (RuntimeException) {
+                    // Legacy/local databases may contain a plain-text or non-Bcrypt
+                    // demo password. Treat it as stale and replace it below.
+                }
+            }
+
+            if (! $passwordMatches) {
                 $user->password = self::PASSWORD;
             }
             $user->save();
