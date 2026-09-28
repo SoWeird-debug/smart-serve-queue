@@ -10,7 +10,10 @@ use Illuminate\Support\Str;
 
 class ResetClinicDemoAccounts extends Command
 {
-    protected $signature = 'smartserve:demo-accounts {--apply : Apply the previewed changes} {--create-only : Local testing only; add missing demo accounts without changing existing accounts}';
+    protected $signature = 'smartserve:demo-accounts
+        {--apply : Apply the previewed changes}
+        {--create-only : Add or repair only the five demo accounts without changing other accounts}
+        {--allow-production-demo : Explicitly allow predictable shared demo credentials in production; requires --create-only}';
 
     protected $description = 'Preview or reset clinic access without deleting patient or clinical history';
 
@@ -18,21 +21,33 @@ class ResetClinicDemoAccounts extends Command
     {
         $roles = ['administrator', 'front_desk', 'nurse_triage', 'doctor', 'pharmacy'];
         $createOnly = (bool) $this->option('create-only');
-        if ($createOnly && ! app()->environment(['local', 'testing'])) {
-            $this->error('Create-only demo setup is restricted to local/testing environments.');
+        $allowProductionDemo = (bool) $this->option('allow-production-demo');
+        if ($allowProductionDemo && ! $createOnly) {
+            $this->error('--allow-production-demo must be used together with --create-only.');
+
+            return self::FAILURE;
+        }
+        if ($createOnly && ! app()->environment(['local', 'testing']) && ! $allowProductionDemo) {
+            $this->error('Production demo setup requires the explicit --allow-production-demo option.');
 
             return self::FAILURE;
         }
         $existing = User::whereIn('role', $roles)->get();
         $this->info('Environment: '.app()->environment().' | Database: '.DB::connection()->getDatabaseName());
         $this->warn($createOnly ? 'Only missing demo accounts will be added. Existing accounts and records remain unchanged.' : 'Existing clinic logins will be disabled. Patient accounts and clinical records are preserved.');
+        if ($allowProductionDemo) {
+            $this->warn('PRODUCTION WARNING: These five accounts share a predictable password and have access to live data. Remove or disable them after the demonstration.');
+        }
         $this->line('Clinic accounts in scope: '.$existing->count());
         if (! $this->option('apply')) {
             $this->info('Preview only. Run again with --apply after backing up the database.');
 
             return self::SUCCESS;
         }
-        if (! $this->confirm($createOnly ? 'Create missing local demo accounts without changing existing accounts?' : 'Have you backed up this database and want to replace clinic access with five demo logins?', false)) {
+        $confirmation = $allowProductionDemo
+            ? 'Create or update the five shared demo accounts in production without changing other accounts?'
+            : ($createOnly ? 'Create missing local demo accounts without changing existing accounts?' : 'Have you backed up this database and want to replace clinic access with five demo logins?');
+        if (! $this->confirm($confirmation, false)) {
             return self::FAILURE;
         }
 
@@ -56,7 +71,7 @@ class ResetClinicDemoAccounts extends Command
         }
 
         if ($createOnly) {
-            app(LocalDemoAccountSeeder::class)->run();
+            app(LocalDemoAccountSeeder::class)->sync($allowProductionDemo);
             $this->table(['Role', 'Username', 'Password'], collect(LocalDemoAccountSeeder::ROLES)
                 ->map(fn (string $role) => [$role, 'demo_'.$role, LocalDemoAccountSeeder::PASSWORD])
                 ->all());

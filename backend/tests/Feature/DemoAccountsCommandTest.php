@@ -63,6 +63,30 @@ class DemoAccountsCommandTest extends TestCase
         $this->assertDatabaseCount('users', 1);
     }
 
+    public function test_production_demo_opt_in_preserves_real_accounts_and_uses_the_known_password(): void
+    {
+        $originalEnvironment = $this->app->environment();
+        $this->app['env'] = 'production';
+        try {
+            $staff = User::factory()->create(['role' => 'doctor', 'is_active' => true]);
+            $before = $staff->fresh()->getAttributes();
+            $question = 'Create or update the five shared demo accounts in production without changing other accounts?';
+
+            $this->artisan('smartserve:demo-accounts --create-only --allow-production-demo --apply')
+                ->expectsConfirmation($question, 'yes')
+                ->assertSuccessful();
+
+            $this->assertSame($before, $staff->fresh()->getAttributes());
+            $this->assertDatabaseCount('users', 6);
+            $this->assertTrue(password_verify(
+                LocalDemoAccountSeeder::PASSWORD,
+                User::where('username', 'demo_doctor')->value('password'),
+            ));
+        } finally {
+            $this->app['env'] = $originalEnvironment;
+        }
+    }
+
     public function test_reset_preserves_patient_and_old_staff_rows_and_rotates_demo_access(): void
     {
         $patient = User::factory()->create(['role' => 'patient', 'is_active' => true]);

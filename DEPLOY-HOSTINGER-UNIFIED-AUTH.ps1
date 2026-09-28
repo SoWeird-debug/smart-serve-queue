@@ -36,7 +36,7 @@ $backupConfirmation = Read-Host "Have you saved a current Hostinger files AND da
 if ($backupConfirmation -cne "YES") { throw "Deployment cancelled before any hosting changes. Create the backup first." }
 
 Write-Host "Putting the application in maintenance mode and preparing release directories..." -ForegroundColor Cyan
-& ssh -p $port $remote "cd $backend && php artisan down && mkdir -p app/Console/Commands app/Support app/Notifications app/Http/Middleware resources/views/emails"
+& ssh -p $port $remote "cd $backend && php artisan down && mkdir -p app/Console/Commands app/Support app/Notifications app/Http/Middleware resources/views/emails database/seeders"
 if ($LASTEXITCODE -ne 0) { throw "Could not prepare the server. No files uploaded." }
 Write-Host "Uploading SmartServe backend release files..." -ForegroundColor Cyan
 Upload-Files @(
@@ -50,6 +50,7 @@ Upload-Files @(
 Upload-Files @("backend/app/Models/User.php") "$backend/app/Models/"
 # Upload the maintenance command, but NEVER run it as part of deployment.
 Upload-Files @("backend/app/Console/Commands/ResetClinicDemoAccounts.php") "$backend/app/Console/Commands/"
+Upload-Files @("backend/database/seeders/LocalDemoAccountSeeder.php") "$backend/database/seeders/"
 Upload-Files @("backend/app/Support/AccountEmails.php") "$backend/app/Support/"
 Upload-Files @("backend/app/Notifications/ClinicAccountMail.php") "$backend/app/Notifications/"
 Upload-Files @("backend/app/Http/Middleware/ActiveVerifiedAccount.php") "$backend/app/Http/Middleware/"
